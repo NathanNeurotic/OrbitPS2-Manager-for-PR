@@ -1,7 +1,10 @@
 import * as fs from "fs/promises";
 import path from "path";
 import { createLogger } from "../logger";
-import { sanitizeGameFilename } from "../utils/sanitize";
+import {
+  sanitizeGameFilename,
+  sanitizeRiptOplPs1StorageName,
+} from "../utils/sanitize";
 import { parseArtworkBaseName } from "../utils/artwork-name";
 import { findPopstarterElf } from "./ps1-import.service";
 
@@ -97,6 +100,54 @@ async function renameMatchingCoverArt(
     log.info(`Renamed ${renamed} artwork file(s) in ${artDir} to "${newBaseName}_*"`);
   }
   return renamed;
+}
+
+async function copyMatchingCoverArt(
+  artDir: string,
+  matches: (nameBeforeType: string) => boolean,
+  newBaseName: string,
+): Promise<number> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(artDir);
+  } catch {
+    return 0;
+  }
+
+  let copied = 0;
+  for (const name of entries) {
+    if (name.startsWith(".")) continue;
+    const ext = path.extname(name);
+    if (!/^\.(png|jpe?g)$/i.test(ext)) continue;
+    const baseName = name.slice(0, -ext.length);
+    const parsed = parseArtworkBaseName(baseName);
+    if (!parsed || !matches(parsed.identity)) continue;
+
+    const targetName = `${newBaseName}_${parsed.type}${ext}`;
+    if (targetName.toLocaleLowerCase() === name.toLocaleLowerCase()) continue;
+
+    const sourcePath = path.join(artDir, name);
+    const targetPath = path.join(artDir, targetName);
+    try {
+      await fs.access(targetPath);
+      log.verbose(`Artwork copy target already exists, keeping it: ${targetName}`);
+      continue;
+    } catch {
+      // Missing target is expected; create it below.
+    }
+
+    try {
+      await fs.copyFile(sourcePath, targetPath);
+      log.verbose(`Copied artwork: ${name} → ${targetName}`);
+      copied++;
+    } catch (err: unknown) {
+      log.warn(
+        `Failed to copy artwork ${name} → ${targetName}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return copied;
 }
 
 interface ArtworkRenameOperation {
@@ -401,7 +452,7 @@ export async function renamePs1LauncherStep1(
   safeNewTitle?: string;
   message?: string;
 }> {
-  const safeNewTitle = sanitizeGameFilename(newTitle);
+  const safeNewTitle = sanitizeRiptOplPs1StorageName(newTitle, "VCD");
   if (!safeNewTitle) {
     return { success: false, message: "The new name is empty or invalid after sanitization." };
   }
@@ -580,7 +631,10 @@ export async function normalizeRiptOplPs1Storage(params: {
   localName?: string;
   message?: string;
 }> {
-  const safeTitle = sanitizeGameFilename(params.canonicalTitle);
+  const safeTitle = sanitizeRiptOplPs1StorageName(
+    params.canonicalTitle,
+    params.kind,
+  );
   if (!safeTitle) {
     return {
       success: false,
@@ -878,7 +932,8 @@ export async function convertPs1LauncherToPopsLoader(
 
   log.info(`PS1 convert-to-POPSLoader: "${vcdBasename}" (gameId=${gameId})`);
 
-  const newVcdBasename = `${oldTitle}${vcdExt}`;
+  const targetTitle = sanitizeRiptOplPs1StorageName(oldTitle, "VCD");
+  const newVcdBasename = `${targetTitle}${vcdExt}`;
   const newVcdPath = path.join(popsDir, newVcdBasename);
 
   const vcdError = await renameVcdFile(vcdPath, newVcdPath, vcdBasename, newVcdBasename, onProgress);
@@ -900,7 +955,7 @@ export async function convertPs1LauncherToPopsLoader(
   await renameMatchingCoverArt(
     path.join(oplRoot, "ART"),
     (nameBeforeType) => nameBeforeType.toUpperCase().includes(gameIdUpper),
-    oldTitle,
+    targetTitle,
     onProgress,
   );
 
@@ -912,8 +967,8 @@ export async function convertPs1LauncherToPopsLoader(
 /**
  * Reverses `convertPs1LauncherToPopsLoader`: prefixes the VCD filename with
  * "<GameID>.", recreates the APPS/POPStarter launcher (POPSTARTER.ELF +
- * title.cfg), and renames any matching ART/ files from the "<Title>_TYPE.png"
- * convention to the "<ELF filename>_TYPE.png" convention POPStarter expects.
+ * title.cfg), moves VCD artwork to the new VCD-stem identity, and duplicates
+ * that artwork under the full launcher ELF filename for the Apps row.
  */
 export async function convertPs1LauncherToPopstarter(
   vcdPath: string,
@@ -932,7 +987,15 @@ export async function convertPs1LauncherToPopstarter(
   const vcdBasename = path.basename(vcdPath);
   const vcdExt = path.extname(vcdBasename);
   const title = vcdBasename.slice(0, -vcdExt.length);
-  const safeTitle = sanitizeGameFilename(title) || title;
+  const filesystemSafeTitle = sanitizeGameFilename(title) || title;
+  const newVcdStem = sanitizeRiptOplPs1StorageName(
+    `${gameId}.${filesystemSafeTitle}`,
+    "VCD",
+  );
+  const prefix = `${gameId}.`;
+  const safeTitle = newVcdStem.startsWith(prefix)
+    ? newVcdStem.slice(prefix.length)
+    : filesystemSafeTitle;
 
   if (title.toLowerCase().startsWith(`${gameId.toLowerCase()}.`)) {
     return { success: false, message: "This game's VCD filename already has a GameID prefix." };
@@ -950,7 +1013,7 @@ export async function convertPs1LauncherToPopstarter(
     };
   }
 
-  const newVcdBasename = `${gameId}.${safeTitle}${vcdExt}`;
+  const newVcdBasename = `${newVcdStem}${vcdExt}`;
   const newVcdPath = path.join(popsDir, newVcdBasename);
 
   const vcdError = await renameVcdFile(vcdPath, newVcdPath, vcdBasename, newVcdBasename, onProgress);
@@ -978,13 +1041,20 @@ export async function convertPs1LauncherToPopstarter(
     return { success: false, newVcdPath, message: msg };
   }
 
-  onProgress?.(88, "Renaming cover art to match the new launcher…");
-  const safeTitleLower = safeTitle.toLowerCase();
+  onProgress?.(88, "Updating VCD and launcher artwork identities…");
+  const artDir = path.join(oplRoot, "ART");
+  const oldTitleLower = title.toLowerCase();
   await renameMatchingCoverArt(
-    path.join(oplRoot, "ART"),
-    (nameBeforeType) => nameBeforeType.toLowerCase() === safeTitleLower,
-    elfFilename,
+    artDir,
+    (nameBeforeType) => nameBeforeType.toLowerCase() === oldTitleLower,
+    newVcdStem,
     onProgress,
+  );
+  const newVcdStemLower = newVcdStem.toLowerCase();
+  await copyMatchingCoverArt(
+    artDir,
+    (nameBeforeType) => nameBeforeType.toLowerCase() === newVcdStemLower,
+    elfFilename,
   );
 
   onProgress?.(PROGRESS_DONE, "Conversion complete");
