@@ -38,7 +38,8 @@ function buildPs1Image(
   layout: Layout,
   bootId: string,
   decoyId: string,
-  padRootDirectory = false
+  padRootDirectory = false,
+  pvdTimestamp?: string
 ): Buffer {
   const sectorSize = layout === "iso" ? BLOCK : 2352;
   const dataOffset = layout === "iso" ? 0 : layout === "mode1" ? 16 : 24;
@@ -69,6 +70,12 @@ function buildPs1Image(
   const pvd = block(16);
   pvd[0] = 1;
   pvd.write("CD001", 1, "ascii");
+  if (pvdTimestamp) {
+    if (!/^\d{16}$/.test(pvdTimestamp)) {
+      throw new Error("PVD timestamp must be exactly 16 ASCII digits.");
+    }
+    pvd.write(pvdTimestamp, 0x32d, "ascii");
+  }
   directoryRecord(rootLba, rootLen, "\0").copy(pvd, 156);
 
   let offset = 0;
@@ -136,4 +143,39 @@ test("SYSTEM.CNF in a multi-block MODE2 root directory is found", async () => {
       assert.equal("gameId" in result && result.gameId, "SLUS_000.67");
     }
   );
+});
+
+
+test("generic PSX.EXE uses the PVD timestamp before a decoy serial", async () => {
+  await withTempFile(
+    "generic.bin",
+    buildPs1Image(
+      "iso",
+      "PSX.EXE",
+      "SCUS_941.63",
+      false,
+      "1994111009000000",
+    ),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, true);
+      assert.equal("gameId" in result && result.gameId, "SLPS_000.01");
+    },
+  );
+});
+
+test("generic PSX.EXE PVD timestamp is read through the POPS VCD header", async () => {
+  const payload = buildPs1Image(
+    "mode2",
+    "PSX.EXE",
+    "SCUS_941.63",
+    false,
+    "1994111009000000",
+  );
+  const vcd = Buffer.concat([Buffer.alloc(VCD_HEADER_SIZE), payload]);
+  await withTempFile("generic.VCD", vcd, async (filePath) => {
+    const result = await tryDeterminePs1GameIdFromVcd(filePath);
+    assert.equal(result.success, true);
+    assert.equal(result.gameId, "SLPS_000.01");
+  });
 });
