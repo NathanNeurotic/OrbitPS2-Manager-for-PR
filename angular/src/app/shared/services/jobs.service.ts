@@ -232,6 +232,10 @@ export class JobsService {
     try {
       const result = await this.runJob(next);
       if (result?.cancelled) {
+        if (result?.artRefresh === false) {
+          this.pendingArtRefresh.clear();
+          this._library.refreshGamesFiles();
+        }
         this.patchJob(next.id, {
           status: 'cancelled',
           percent: 100,
@@ -423,6 +427,9 @@ export class JobsService {
         return {
           success: false,
           cancelled: true,
+          // Storage may already have been renamed above; the library must
+          // re-scan or it keeps pointing at the old VCD/folder path.
+          artRefresh: normalizedStorage ? false : undefined,
           message: 'Cancelled by user.',
         };
       }
