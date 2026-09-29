@@ -75,3 +75,32 @@ describe('artTargetsForScope PS1 normalization', () => {
     expect(existingArtTypesForGame(game, [...TYPES])).toEqual(['ICO']);
   });
 });
+
+
+describe('RiptOPL PS1 artwork compatibility fallbacks', () => {
+  it('does not count loose GameID art for a title-only VCD', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', 'SPYRO THE DRAGON', [
+      'SCUS_942.28_COV',
+    ]);
+    game.gameId = 'SCUS_942.28';
+
+    expect(existingArtTypesForGame(game, ['COV'])).toEqual([]);
+  });
+
+  it('counts GameID art only when the VCD filename starts with that GameID', () => {
+    const game = ps1Vcd('SCUS_942.28.Spyro the Dragon.VCD', undefined, [
+      'SCUS_942.28_COV',
+    ]);
+    game.gameId = 'SCUS_942.28';
+
+    expect(existingArtTypesForGame(game, ['COV'])).toEqual(['COV']);
+  });
+
+  it('treats local COV3 as satisfying the database COV2 slot', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', undefined, [
+      'Spyro the Dragon_COV3',
+    ]);
+
+    expect(existingArtTypesForGame(game, ['COV2'])).toEqual(['COV2']);
+  });
+});
