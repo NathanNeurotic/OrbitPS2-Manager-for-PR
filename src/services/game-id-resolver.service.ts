@@ -15,6 +15,7 @@ import { findPs1GameName, findPs2GameName } from "../utils/games-list";
 import { parseCueSheet, getCueDirectory } from "../utils/cue-parser";
 import { streamZsoContents } from "./zso.service";
 import { extractDiscZip, cleanupExtractedZip } from "../utils/zip-extract";
+import { lookupPs1GameIdByPvdTimestamp } from "../utils/ps1-pvd-game-id";
 
 const log = createLogger("game-id");
 
@@ -147,6 +148,47 @@ async function tryReadPs1IdFromSystemCnf(
       }
       off += recLen;
     }
+  }
+
+  return null;
+}
+
+/**
+ * Generic-boot PS1 identity fallback used by pcm720/OSDMenu: when SYSTEM.CNF
+ * does not contain a serial-shaped executable name, use the ISO9660 Primary
+ * Volume Descriptor's 16-byte creation timestamp to resolve a known disc ID.
+ *
+ * This deliberately runs before the broad raw serial scan. A generic-boot disc
+ * can contain unrelated serial-looking strings elsewhere in its data, so the
+ * PVD timestamp is the authoritative fallback for entries in the verified
+ * timestamp table.
+ */
+async function tryReadPs1IdFromPvdTimestamp(
+  fileHandle: fs.FileHandle,
+  baseOffset = 0
+): Promise<string | null> {
+  for (const layout of SECTOR_LAYOUTS) {
+    const pvd = await readUserData(
+      fileHandle,
+      baseOffset,
+      layout,
+      16,
+      ISO_BLOCK_SIZE
+    );
+    if (
+      !pvd ||
+      pvd[0] !== 0x01 ||
+      pvd.subarray(1, 6).toString("ascii") !== "CD001"
+    ) {
+      continue;
+    }
+
+    // ISO9660 PVD volume creation date: byte offset 0x32D, 16 ASCII digits.
+    const timestamp = pvd.subarray(0x32d, 0x32d + 16).toString("ascii");
+    if (!/^\d{16}$/.test(timestamp)) continue;
+
+    const gameId = lookupPs1GameIdByPvdTimestamp(timestamp);
+    if (gameId) return gameId;
   }
 
   return null;
@@ -410,6 +452,25 @@ export async function tryDeterminePs1GameIdFromVcd(
       };
     }
 
+    const pvdTimestampId = await tryReadPs1IdFromPvdTimestamp(
+      fileHandle,
+      VCD_HEADER_SIZE
+    );
+    if (pvdTimestampId) {
+      const lookupId = normaliseGameIdForLookup(pvdTimestampId);
+      const gameName = await findPs1GameName(lookupId);
+      log.verbose(
+        `PS1 VCD scan: PVD timestamp resolved ${pvdTimestampId}` +
+          (gameName ? ` (${gameName})` : "")
+      );
+      return {
+        success: true,
+        gameId: pvdTimestampId,
+        formattedGameId: lookupId,
+        ...(gameName ? { gameName } : {}),
+      };
+    }
+
     log.verbose(`PS1 VCD scan: reading ${path.basename(filepath)} from offset 1 MB (VCD header skip)`);
     const buffer = Buffer.alloc(FILE_SCAN_CHUNK_BYTES);
     let position = VCD_HEADER_SIZE;
@@ -557,6 +618,22 @@ export async function tryDeterminePs1GameIdFromHex(
         return {
           success: true,
           gameId: systemCnfId,
+          formattedGameId: lookupId,
+          ...(gameName ? { gameName } : {}),
+        };
+      }
+
+      const pvdTimestampId = await tryReadPs1IdFromPvdTimestamp(fileHandle);
+      if (pvdTimestampId) {
+        const lookupId = normaliseGameIdForLookup(pvdTimestampId);
+        const gameName = await findPs1GameName(lookupId);
+        log.verbose(
+          `PS1 hex scan: PVD timestamp resolved ${pvdTimestampId}` +
+            (gameName ? ` (${gameName})` : "")
+        );
+        return {
+          success: true,
+          gameId: pvdTimestampId,
           formattedGameId: lookupId,
           ...(gameName ? { gameName } : {}),
         };
