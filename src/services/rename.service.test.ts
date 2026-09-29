@@ -89,7 +89,7 @@ test("canonical storage still migrates GameID-keyed artwork", async () => {
   });
 });
 
-test("duplicate old-name and GameID artwork targeting one slot is refused", async () => {
+test("GameID artwork is skipped when storage-identity artwork owns the slot", async () => {
   await withTempDir(async (dir) => {
     const gamesDir = path.join(dir, "EMBER", "games");
     const artDir = path.join(dir, "ART");
@@ -109,11 +109,19 @@ test("duplicate old-name and GameID artwork targeting one slot is refused", asyn
       artDir,
     });
 
-    assert.equal(result.success, false);
-    assert.match(result.message ?? "", /would become the same/i);
-    await fs.access(gameFolder);
-    await fs.access(path.join(artDir, "Spyro4_COV.png"));
-    await fs.access(path.join(artDir, "SCUS_944.25_COV.jpg"));
+    assert.equal(result.success, true);
+    await fs.access(path.join(gamesDir, "SPYRO 2 - RIPTO'S RAGE"));
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+        "utf8",
+      ),
+      "folder-art",
+    );
+    assert.equal(
+      await fs.readFile(path.join(artDir, "SCUS_944.25_COV.jpg"), "utf8"),
+      "id-art",
+    );
   });
 });
 
@@ -240,5 +248,45 @@ test("legacy COV2 art migrates into the RiptOPL COV3 slot", async () => {
       "secondary",
     );
     await assert.rejects(() => fs.access(path.join(artDir, "Spyro_COV2.png")));
+  });
+});
+
+
+test("leftover GameID artwork does not block canonical artwork", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const vcd = path.join(popsDir, "SPYRO 2 - RIPTO'S RAGE.VCD");
+    await fs.writeFile(vcd, "vcd");
+    await fs.writeFile(
+      path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+      "canonical",
+    );
+    await fs.writeFile(path.join(artDir, "SCUS_944.25_COV.png"), "legacy");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: vcd,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.changed, false);
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+        "utf8",
+      ),
+      "canonical",
+    );
+    assert.equal(
+      await fs.readFile(path.join(artDir, "SCUS_944.25_COV.png"), "utf8"),
+      "legacy",
+    );
   });
 });
