@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { tryDeterminePs1GameIdFromHex } from "./game-id-resolver.service";
+import { resolveKnownPs1ConflictDigest } from "../utils/ps1-disc-identity";
 
 type Layout = "iso" | "mode2";
 const BLOCK = 2048;
@@ -159,4 +160,23 @@ test("PVD identification preserves Cyberwar's disc-specific title", async () => 
       assert.equal(result.identificationMethod, "pvd");
     },
   );
+});
+
+
+test("verified shared-serial digest resolves to the disc-specific identity", () => {
+  const match = resolveKnownPs1ConflictDigest(
+    "SLPS_015.27",
+    "4a1f0b0c83af1f0b86c148d7fcbbd683",
+  );
+  assert.ok(match);
+  assert.equal(match.discId, "SLPS_015.28");
+  assert.equal(match.title, "Alive (Disc 2)");
+});
+
+test("unknown digest never guesses a disc within a shared serial", () => {
+  const match = resolveKnownPs1ConflictDigest(
+    "SLPS_015.27",
+    "00000000000000000000000000000000",
+  );
+  assert.equal(match, null);
 });
