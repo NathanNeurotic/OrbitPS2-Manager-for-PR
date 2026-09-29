@@ -29,6 +29,9 @@ jobs:
       - name: Run backend tests
         run: npm test
 
+      - name: Generate build info
+        run: npm run build:info
+
       - name: Install Angular dependencies
         working-directory: angular
         run: npm ci --ignore-scripts
