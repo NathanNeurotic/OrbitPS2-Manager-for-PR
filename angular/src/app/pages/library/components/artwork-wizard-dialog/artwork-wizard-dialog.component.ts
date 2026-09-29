@@ -5,8 +5,10 @@ import { JobsService, NewImportJob } from '@shared/services/jobs.service';
 import { LibraryService } from '@shared/services/library.service';
 import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
 import {
+  ps1ArtworkIdentities,
   ps1CanonicalRename,
   ps1CanonicalRenameConfirm,
+  ps1CanonicalStorageName,
 } from '@shared/utils/ps1-canonical-rename';
 import {
   ART_CATEGORIES,
@@ -192,27 +194,25 @@ export class ArtworkWizardDialogComponent {
       return g.ps1LauncherBoot || g.gameId;
     }
     if (g.system === 'PS1') {
-      if (g.canonicalTitle) return g.canonicalTitle;
-      if (g.format === 'EMBER') return g.emberFolder || g.gameId;
-      return g.filename?.replace(/\.[^./\\]+$/, '') || g.gameId;
+      return (
+        ps1CanonicalStorageName(g) ||
+        (g.format === 'EMBER'
+          ? g.emberFolder
+          : g.filename?.replace(/\.[^./\\]+$/, '')) ||
+        g.gameId
+      );
     }
     return g.gameId;
   }
 
   /**
-   * PS1 POPSLoader/RiptOPL VCDs only: the VCD title stem (filename without
-   * extension). Their art may be saved either as "<GameID>_<type>.png" or
-   * "<Title>_<type>.png", so both names have to be probed to detect what
-   * already exists.
+   * Current PS1 artwork identities the loader can actually resolve. VCDs only
+   * gain the GameID fallback when the ID is a strict prefix of the VCD stem;
+   * Ember is folder-name keyed only.
    */
-  private get ps1VcdStem(): string | undefined {
-    const g = this.game();
-    if (this.system !== 'PS1' || this.isPs1Launcher) {
-      return undefined;
-    }
-    if (g.format === 'EMBER') return g.emberFolder;
-    if (!g.filename) return undefined;
-    return g.filename.replace(/\.[^./\\]+$/, '');
+  private get ps1CurrentArtIdentities(): string[] | undefined {
+    if (this.system !== 'PS1' || this.isPs1Launcher) return undefined;
+    return ps1ArtworkIdentities(this.game());
   }
 
   async ngOnInit() {
@@ -234,13 +234,16 @@ export class ArtworkWizardDialogComponent {
 
       const dirPath = this._library.currentDirectoryValue;
       const localName = this.localName;
-      const ps1VcdStem = this.ps1VcdStem;
+      const ps1CurrentArtIdentities = this.ps1CurrentArtIdentities;
       // Existence is probed by save base, not by database code: art is stored as
       // the file OPL reads, and a screenshot can land on either of the two
       // slots, so both are probed for every screenshot. The exact stem each base
       // may be saved under is kept so a hit maps back to its base unambiguously
       // (`SLUS` must not swallow `SLUS_Title_COV.png`).
-      const stems = ps1VcdStem === undefined ? [localName] : [localName, ps1VcdStem];
+      const stems =
+        ps1CurrentArtIdentities === undefined
+          ? [localName]
+          : [...new Set([localName, ...ps1CurrentArtIdentities])];
       const baseOfFile = new Map<string, string>();
       for (const stem of stems) {
         for (const d of result.data) {
@@ -536,7 +539,9 @@ export class ArtworkWizardDialogComponent {
             : 'VCD'
           : undefined,
       canonicalName:
-        g.system === 'PS1' && !this.isPs1Launcher ? g.canonicalTitle : undefined,
+        g.system === 'PS1' && !this.isPs1Launcher
+          ? ps1CanonicalStorageName(g)
+          : undefined,
       artTypes: types,
       artSaveAsOverrides:
         Object.keys(artSaveAsOverrides).length > 0
