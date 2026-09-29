@@ -25,3 +25,45 @@ export function sanitizeGameFilename(name: string): string {
 
   return cleaned;
 }
+
+
+export type RiptOplPs1StorageKind = 'VCD' | 'EMBER';
+
+const RIPTOPL_PS1_STORAGE_MAX_BYTES: Record<RiptOplPs1StorageKind, number> = {
+  VCD: 160,
+  EMBER: 180,
+};
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function truncateUtf8Bytes(value: string, maxBytes: number): string {
+  if (utf8Length(value) <= maxBytes) return value;
+
+  let result = '';
+  for (const char of value) {
+    const candidate = result + char;
+    if (utf8Length(candidate) > maxBytes) break;
+    result = candidate;
+  }
+  return result;
+}
+
+/** Renderer-side mirror of the backend RiptOPL PS1 storage-name rules. */
+export function sanitizeRiptOplPs1StorageName(
+  name: string,
+  kind: RiptOplPs1StorageKind,
+): string {
+  let cleaned = sanitizeGameFilename(name);
+  cleaned = truncateUtf8Bytes(
+    cleaned,
+    RIPTOPL_PS1_STORAGE_MAX_BYTES[kind],
+  ).replace(/^[.\s]+|[.\s]+$/g, '');
+
+  if (!cleaned) cleaned = '_';
+  if (kind === 'VCD' && cleaned.toUpperCase() === 'POPSTARTER') {
+    cleaned = 'POPSTARTER_';
+  }
+  return cleaned;
+}
