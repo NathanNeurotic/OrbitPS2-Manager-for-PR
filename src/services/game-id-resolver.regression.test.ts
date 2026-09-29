@@ -3,7 +3,10 @@ import { test } from "node:test";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { tryDeterminePs1GameIdFromHex } from "./game-id-resolver.service";
+import {
+  tryDeterminePs1GameIdFromHex,
+  tryDeterminePs1GameIdFromVcd,
+} from "./game-id-resolver.service";
 import { resolveKnownPs1ConflictDigest } from "../utils/ps1-disc-identity";
 
 type Layout = "iso" | "mode2";
@@ -192,6 +195,36 @@ test("shared PVD serial without a verified disc rule remains ambiguous", async (
       assert.equal(result.gameId, "SLPS_000.71");
       assert.equal(result.identificationStatus, "ambiguous");
       assert.equal(result.gameName, undefined);
+    },
+  );
+});
+
+
+test("VCD track 1 INDEX 01 offset is respected", async () => {
+  const header = Buffer.alloc(1048576);
+  header.write("kHn ", 1024, "ascii");
+  header[17] = 0x01;
+  header[30] = 0x41;
+  header[32] = 0x01;
+  // cue2pops stores track 1 INDEX 01 with +2 seconds. Original 00:02:00
+  // therefore appears as 00:04:00 in the VCD header.
+  header[37] = 0x00;
+  header[38] = 0x04;
+  header[39] = 0x00;
+
+  const payload = Buffer.concat([
+    Buffer.alloc(150 * 2352),
+    buildPs1Image("mode2", "SLUS_000.67", "SCUS_941.63"),
+  ]);
+
+  await withTempFile(
+    "shifted.vcd",
+    Buffer.concat([header, payload]),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromVcd(filePath);
+      assert.equal(result.success, true);
+      assert.equal(result.gameId, "SLUS_000.67");
+      assert.equal(result.identificationMethod, "boot");
     },
   );
 });
