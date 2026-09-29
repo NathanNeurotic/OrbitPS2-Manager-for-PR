@@ -1,7 +1,7 @@
 /** Friendly label for each known art-type suffix (`GAMEID_<code>.png`). */
 export const ART_TYPE_LABELS: Record<string, string> = {
   COV: 'Cover',
-  COV2: 'Cover (Alt 2)',
+  COV2: '3D Cover',
   ICO: 'Icon',
   SCR: 'Screenshot',
   SCR2: 'Screenshot 2',
@@ -45,14 +45,21 @@ export function isScreenshotArtCode(code: string): boolean {
  *   - `BG_00` / `BG_01` / … → `BG`  → saved as `<gameID>_BG.png` (one kept)
  *   - `SCR_00` / `SCR_05` / … → `SCR` → saved as `<gameID>_SCR.png` or
  *     `<gameID>_SCR2.png`
- *   - anything else keeps its code (`COV`, `COV2`, …)
+ *   - database `COV2` → RiptOPL local `COV3`
+ *   - anything else keeps its code (`COV`, `ICO`, …)
  *
  * Which of the two screenshot files a code lands in is a *selection* decision,
  * not one the code itself can make — see {@link artSaveNamesForSelection}.
  */
 export function artSaveNameForType(code: string): string {
-  const indexed = INDEXED_CODE_RE.exec(code);
-  return indexed ? indexed[1].toUpperCase() : code.toUpperCase();
+  const upper = code.toUpperCase();
+  // The shared OPL art database calls the secondary/3D cover COV2. RiptOPL's
+  // local artwork contract names that slot COV3, so keep the remote lookup
+  // code but translate the filename written to disk.
+  if (upper === 'COV2') return 'COV3';
+
+  const indexed = INDEXED_CODE_RE.exec(upper);
+  return indexed ? indexed[1].toUpperCase() : upper;
 }
 
 /** Every save base a type code can occupy; screenshots may take either slot. */
