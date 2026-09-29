@@ -6,7 +6,10 @@ import { parseCueSheet, getCueDirectory } from "../utils/cue-parser";
 import { extractDiscZip } from "../utils/zip-extract";
 import { tryDeterminePs1GameIdFromHex } from "./game-id-resolver.service";
 import { downloadArtByGameId } from "./artwork.service";
-import { sanitizeGameFilename } from "../utils/sanitize";
+import {
+  sanitizeGameFilename,
+  sanitizeRiptOplPs1StorageName,
+} from "../utils/sanitize";
 import { describeFileAccessError } from "../utils/file-access-error";
 import { getAssetsDir } from "../utils/resource-path";
 import { createLogger } from "../logger";
@@ -178,10 +181,13 @@ export async function importPs1Game(
     if (onProgress) onProgress(35, "Converting to VCD format");
 
     const sanitizedName = sanitizeGameFilename(gameName);
-    const vcdFilename =
+    const vcdStem = sanitizeRiptOplPs1StorageName(
       launcherMode === "popsloader"
-        ? `${sanitizedName}.VCD`
-        : `${gameId}.${sanitizedName}.VCD`;
+        ? sanitizedName
+        : `${gameId}.${sanitizedName}`,
+      "VCD",
+    );
+    const vcdFilename = `${vcdStem}.VCD`;
     const vcdPath = path.join(popsDir, vcdFilename);
     log.verbose(`Converting to VCD → POPS/${vcdFilename}`);
 
@@ -241,12 +247,21 @@ export async function importPs1Game(
     if (downloadArtwork) {
       if (onProgress) onProgress(93, "Downloading artwork");
       try {
-        // POPSLoader/RiptOPL match art to a game by its VCD filename (no
-        // GameID prefix), not by GameID — save it under that name instead
-        // of the POPStarter naming used below.
-        const artSaveName =
-          launcherMode === "popsloader" ? sanitizedName : elfFilename;
-        await downloadArtByGameId(artDir, gameId, "PS1", artSaveName, ["COV"]);
+        // RiptOPL's VCD row is keyed by the exact VCD filename stem.
+        await downloadArtByGameId(artDir, gameId, "PS1", vcdStem, ["COV"]);
+
+        // POPStarter mode also creates an Apps row. RiptOPL keys App artwork by
+        // the complete boot ELF filename, including the .ELF extension, so keep
+        // a second copy under that identity instead of sacrificing the VCD art.
+        if (elfFilename) {
+          await downloadArtByGameId(
+            artDir,
+            gameId,
+            "PS1",
+            elfFilename,
+            ["COV"],
+          );
+        }
       } catch {
         // Art download failure is non-critical
       }
