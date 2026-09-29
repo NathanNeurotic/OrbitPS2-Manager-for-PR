@@ -210,3 +210,35 @@ test("VMC folder follows a successful canonical VCD rename", async () => {
     await assert.rejects(() => fs.access(path.join(popsDir, "Spyro4")));
   });
 });
+
+
+test("legacy COV2 art migrates into the RiptOPL COV3 slot", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const vcd = path.join(popsDir, "Spyro.VCD");
+    await fs.writeFile(vcd, "vcd");
+    await fs.writeFile(path.join(artDir, "Spyro_COV2.png"), "secondary");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: vcd,
+      gameId: "SCUS_942.28",
+      canonicalTitle: "SPYRO THE DRAGON",
+      artDir,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO THE DRAGON_COV3.png"),
+        "utf8",
+      ),
+      "secondary",
+    );
+    await assert.rejects(() => fs.access(path.join(artDir, "Spyro_COV2.png")));
+  });
+});
