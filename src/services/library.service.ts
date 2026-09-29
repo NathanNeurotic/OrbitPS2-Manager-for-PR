@@ -353,9 +353,10 @@ export async function getArtFolder(dirpath: string) {
             const baseName = path.parse(item.name).name;
             const parsed = parseArtworkBaseName(baseName);
             const type = parsed?.type ?? "";
-            const nameBeforeType = parsed?.identity ?? baseName;
-            const idMatch = nameBeforeType.match(/([A-Z]{4}_\d{3}\.\d{2})/i);
-            const gameId = idMatch ? idMatch[1] : nameBeforeType;
+            // This field is the full artwork identity stem, not necessarily a
+            // disc ID. That distinction is required for RiptOPL Apps, whose
+            // identity is the complete ELF filename (including .ELF).
+            const gameId = parsed?.identity ?? baseName;
             return {
               name: baseName,
               extension: path.extname(item.name),
