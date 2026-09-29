@@ -27,7 +27,10 @@ const wholeFileRules = conflicts.wholeFile as ConflictRule[];
 const dataTrackRules = conflicts.dataTrack as ConflictRule[];
 
 function normalizeDiscId(id: string): string {
-  return id.trim().toUpperCase().replace("-", "_");
+  const compact = id.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const match = compact.match(/^([A-Z]{4})(\d{5})$/);
+  if (!match) return id.trim().toUpperCase().replace("-", "_");
+  return `${match[1]}_${match[2].slice(0, 3)}.${match[2].slice(3)}`;
 }
 
 export function isKnownPs1Conflict(gameId: string): boolean {
