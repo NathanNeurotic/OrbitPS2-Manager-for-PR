@@ -1,7 +1,6 @@
 {
   "sources": {
-    "gdx": "https://github.com/GDX-X/PFS-BatchKit-Manager/blob/5e7e835ced587bb4784fe24489e0918ca0d44e2c/PFS-BatchKit-Manager/BAT/Fix_Conflict_Gameid_Title.bat",
-    "redump": "https://github.com/libretro/libretro-database/blob/d5bae90b22018ce3c9c5a8eff4141a4768c8dd5f/metadat/redump/Sony%20-%20PlayStation.dat"
+    "gdx": "https://github.com/GDX-X/PFS-BatchKit-Manager/blob/5e7e835ced587bb4784fe24489e0918ca0d44e2c/PFS-BatchKit-Manager/BAT/Fix_Conflict_Gameid_Title.bat"
   },
   "conflicts": [
     "SCUS_941.61",
@@ -193,97 +192,5 @@
       "discId": "SLUG_005.15"
     }
   ],
-  "dataTrack": [
-    {
-      "internalId": "SCUS_945.03",
-      "md5": "e3b5ab6c8e2baf21d5e2350c2f9d4c02",
-      "size": 106148112,
-      "title": "1Xtreme (USA)",
-      "discId": "SCUS_945.03"
-    },
-    {
-      "internalId": "SLPS_000.71",
-      "md5": "5d2d683ec1f31ef39af6a3c933f6a297",
-      "size": 555335424,
-      "title": "3x3 Eyes - Kyuusei Koushu (Japan) (Disc 1)",
-      "discId": "SLPS_000.71"
-    },
-    {
-      "internalId": "SLPS_000.71",
-      "md5": "3222c5a7f83caebf1f535a11383e79ad",
-      "size": 516597984,
-      "title": "3x3 Eyes - Kyuusei Koushu (Japan) (Disc 2)",
-      "discId": "SLPS_000.72"
-    },
-    {
-      "internalId": "SLPS_015.27",
-      "md5": "d43c87d7714874c0e4a20bc720d01f7d",
-      "size": 726314064,
-      "title": "Alive (Japan) (Disc 1)",
-      "discId": "SLPS_015.27"
-    },
-    {
-      "internalId": "SLPS_015.27",
-      "md5": "471d9cd7d3540f9c0328b75e7b4c9fc1",
-      "size": 722473248,
-      "title": "Alive (Japan) (Disc 2)",
-      "discId": "SLPS_015.28"
-    },
-    {
-      "internalId": "SLPS_015.27",
-      "md5": "364fad4efdb14afc089a9d7780fb86eb",
-      "size": 722242752,
-      "title": "Alive (Japan) (Disc 3)",
-      "discId": "SLPS_015.29"
-    },
-    {
-      "internalId": "SLPS_027.28",
-      "md5": "4d86d1802af8f8e8b3201bd20c70254d",
-      "size": 697690224,
-      "title": "Breath of Fire IV (USA) (Beta)",
-      "discId": "SLPS_027.28"
-    },
-    {
-      "internalId": "SLPS_027.28",
-      "md5": "540b8d43425a4cbecd2ae4aa0b92e389",
-      "size": 654589824,
-      "title": "Breath of Fire IV - Utsurowazaru Mono (Japan)",
-      "discId": "SLPS_027.28"
-    },
-    {
-      "internalId": "SLPS_012.32",
-      "md5": "d4289bcfe7851076707a96d189d9d46c",
-      "size": 398602848,
-      "title": "Bust A Move (Japan) (Disc 1) (Genteiban)",
-      "discId": "SLPS_012.32"
-    },
-    {
-      "internalId": "SLPS_000.55",
-      "md5": "d02c4fb2e324d93a2199923856547683",
-      "size": 633539424,
-      "title": "Cyberwar (Japan) (Disc 1)",
-      "discId": "SLPS_000.55"
-    },
-    {
-      "internalId": "SLPS_000.55",
-      "md5": "d4666cdc96a5c9d508fd6316fdd58afc",
-      "size": 639424128,
-      "title": "Cyberwar (Japan) (Disc 2)",
-      "discId": "SLPS_000.56"
-    },
-    {
-      "internalId": "SLPS_000.55",
-      "md5": "f6c91753e3f94096dd6f367677cfeb13",
-      "size": 686464128,
-      "title": "Cyberwar (Japan) (Disc 3)",
-      "discId": "SLPS_000.57"
-    },
-    {
-      "internalId": "SCUS_945.03",
-      "md5": "30affebacd10a8dda1336fb3b5fd09b0",
-      "size": 217026096,
-      "title": "ESPN Extreme Games (USA)",
-      "discId": "SCUS_945.03"
-    }
-  ]
+  "dataTrack": []
 }
