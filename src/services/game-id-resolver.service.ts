@@ -194,10 +194,10 @@ async function tryReadPs1IdFromSystemCnf(
  * does not contain a serial-shaped executable name, use the ISO9660 Primary
  * Volume Descriptor's 16-byte creation timestamp to resolve a known disc ID.
  *
- * This deliberately runs before the broad raw serial scan. A generic-boot disc
- * can contain unrelated serial-looking strings elsewhere in its data, so the
- * PVD timestamp is the authoritative fallback for entries in the verified
- * timestamp table.
+ * A generic-boot disc can contain unrelated serial-looking strings elsewhere
+ * in its data, so the verified PVD timestamp table is the only automatic
+ * fallback after SYSTEM.CNF. Orbit does not guess from arbitrary raw serial
+ * text when structured identification fails.
  */
 async function tryReadPs1IdFromPvdTimestamp(
   fileHandle: fs.FileHandle,
