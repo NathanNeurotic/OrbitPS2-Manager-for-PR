@@ -1,7 +1,12 @@
 import { Game } from '@shared/types/game.type';
-import { KNOWN_ART_TYPES } from '@shared/constants/artwork-presets';
 import {
+  KNOWN_ART_TYPES,
+  artSaveNameForType,
+} from '@shared/constants/artwork-presets';
+import {
+  ps1ArtworkIdentities,
   ps1CanonicalRename,
+  ps1CanonicalStorageName,
   ps1StorageIdentity,
 } from '@shared/utils/ps1-canonical-rename';
 
@@ -89,8 +94,9 @@ export function artTargetsForScope(
     .map((g) => {
       const isPs1Launcher = g.system === 'APPS' && !!g.isPs1Launcher;
       const currentPs1Identity = ps1StorageIdentity(g);
+      const canonicalPs1Identity = ps1CanonicalStorageName(g);
       const normalizeThis =
-        normalize && g.system === 'PS1' && !!g.canonicalTitle;
+        normalize && g.system === 'PS1' && !!canonicalPs1Identity;
       return {
         label: g.title || g.gameId || g.filename,
         path: g.path,
@@ -106,7 +112,7 @@ export function artTargetsForScope(
             ? ('EMBER' as const)
             : ('VCD' as const)
           : undefined,
-        canonicalName: normalizeThis ? g.canonicalTitle : undefined,
+        canonicalName: normalizeThis ? canonicalPs1Identity : undefined,
         renameFrom: needsPs1Normalization(g) ? currentPs1Identity : undefined,
       };
     });
@@ -119,9 +125,9 @@ export function artTargetsForScope(
  * dialog's pre-flight numbers agree with what the Library page actually
  * shows:
  *   - PS1 POPStarter launchers  → matched by boot ELF filename (name-based)
- *   - PS1 POPSLoader/RiptOPL VCDs → matched by gameId **or** VCD title stem
- *     (their art may be saved under either convention)
- *   - Ember games               → matched by gameId or game-folder name
+ *   - PS1 VCDs                 → VCD stem, plus GameID only when the current
+ *     VCD filename itself begins with that GameID (RiptOPL's compatibility fallback)
+ *   - Ember games               → game-folder name only
  *   - Everything else          → matched by gameId
  *
  * Art saved under a canonical title the storage has not been renamed to is
@@ -134,17 +140,19 @@ export function existingArtTypesForGame(
   const art = Array.isArray(game.art) ? game.art : [];
   const launcherBoot = game.isPs1Launcher ? game.ps1LauncherBoot : undefined;
   const acceptedNames = new Set(
-    [game.gameId, ps1StorageIdentity(game)].filter(
-      (value): value is string => !!value,
-    ),
+    game.system === 'PS1'
+      ? ps1ArtworkIdentities(game)
+      : [game.gameId].filter((value): value is string => !!value),
   );
-  return types.filter((type) =>
-    art.some(
+
+  return types.filter((type) => {
+    const installedType = artSaveNameForType(type).toUpperCase();
+    return art.some(
       (a) =>
-        a.type?.toUpperCase() === type &&
+        a.type?.toUpperCase() === installedType &&
         (launcherBoot
-          ? a.name === `${launcherBoot}_${type}`
+          ? a.name === `${launcherBoot}_${installedType}`
           : acceptedNames.has(a.gameId)),
-    ),
-  );
+    );
+  });
 }
