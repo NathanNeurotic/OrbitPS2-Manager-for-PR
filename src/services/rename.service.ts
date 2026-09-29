@@ -101,6 +101,187 @@ async function renameMatchingCoverArt(
   return renamed;
 }
 
+interface ArtworkRenameOperation {
+  sourcePath: string;
+  targetPath: string;
+  sourceName: string;
+  targetName: string;
+}
+
+async function planMatchingCoverArtRenames(
+  artDir: string,
+  matches: (nameBeforeType: string) => boolean,
+  newBaseName: string,
+): Promise<{ operations: ArtworkRenameOperation[]; message?: string }> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(artDir);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return { operations: [] };
+    }
+    return {
+      operations: [],
+      message:
+        "Could not inspect existing artwork: " +
+        (err instanceof Error ? err.message : String(err)),
+    };
+  }
+
+  const imageEntries = entries.filter((name) =>
+    /^\.(png|jpe?g)$/i.test(path.extname(name))
+  );
+  const plannedLogicalTargets = new Map<string, string>();
+  const operations: ArtworkRenameOperation[] = [];
+
+  for (const name of imageEntries) {
+    if (name.startsWith(".")) continue;
+
+    const ext = path.extname(name);
+    const baseName = name.slice(0, -ext.length);
+    const lastUnderscore = baseName.lastIndexOf("_");
+    if (lastUnderscore < 0) continue;
+
+    const nameBeforeType = baseName.slice(0, lastUnderscore);
+    const type = baseName.slice(lastUnderscore + 1);
+    if (!matches(nameBeforeType)) continue;
+
+    const targetName = newBaseName + "_" + type + ext;
+    if (targetName === name) continue;
+
+    const sourceLower = name.toLocaleLowerCase();
+    const targetLogicalKey = path.parse(targetName).name.toLocaleLowerCase();
+
+    const duplicatePlannedSource = plannedLogicalTargets.get(targetLogicalKey);
+    if (duplicatePlannedSource && duplicatePlannedSource !== name) {
+      return {
+        operations: [],
+        message:
+          'Cannot normalize artwork because both "' +
+          duplicatePlannedSource +
+          '" and "' +
+          name +
+          '" would become the same "' +
+          path.parse(targetName).name +
+          '" artwork slot.',
+      };
+    }
+
+    const existingCollision = imageEntries.find((existing) => {
+      if (existing.toLocaleLowerCase() === sourceLower) return false;
+      return path.parse(existing).name.toLocaleLowerCase() === targetLogicalKey;
+    });
+    if (existingCollision) {
+      return {
+        operations: [],
+        message:
+          'Cannot normalize artwork because "' +
+          existingCollision +
+          '" already occupies the target slot for "' +
+          targetName +
+          '".',
+      };
+    }
+
+    plannedLogicalTargets.set(targetLogicalKey, name);
+    operations.push({
+      sourcePath: path.join(artDir, name),
+      targetPath: path.join(artDir, targetName),
+      sourceName: name,
+      targetName,
+    });
+  }
+
+  return { operations };
+}
+
+async function renameCaseAware(
+  sourcePath: string,
+  targetPath: string,
+  token: string,
+): Promise<void> {
+  if (
+    sourcePath !== targetPath &&
+    sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase()
+  ) {
+    const tempPath =
+      sourcePath + ".orbit-rename-" + process.pid + "-" + token;
+    await fs.rename(sourcePath, tempPath);
+    try {
+      await fs.rename(tempPath, targetPath);
+    } catch (err) {
+      await fs.rename(tempPath, sourcePath).catch(() => undefined);
+      throw err;
+    }
+    return;
+  }
+
+  await fs.rename(sourcePath, targetPath);
+}
+
+async function executeArtworkRenamePlan(
+  operations: ArtworkRenameOperation[],
+): Promise<{ success: boolean; renamed: number; message?: string }> {
+  const completed: ArtworkRenameOperation[] = [];
+
+  for (let index = 0; index < operations.length; index++) {
+    const operation = operations[index];
+    try {
+      await renameCaseAware(
+        operation.sourcePath,
+        operation.targetPath,
+        "art-" + index,
+      );
+      completed.push(operation);
+      log.verbose(
+        "Renamed artwork: " +
+          operation.sourceName +
+          " → " +
+          operation.targetName
+      );
+    } catch (err: unknown) {
+      let rollbackFailed = false;
+      for (
+        let rollbackIndex = completed.length - 1;
+        rollbackIndex >= 0;
+        rollbackIndex--
+      ) {
+        const done = completed[rollbackIndex];
+        try {
+          await renameCaseAware(
+            done.targetPath,
+            done.sourcePath,
+            "art-rollback-" + rollbackIndex,
+          );
+        } catch {
+          rollbackFailed = true;
+        }
+      }
+
+      return {
+        success: false,
+        renamed: 0,
+        message:
+          'Failed to rename artwork "' +
+          operation.sourceName +
+          '" → "' +
+          operation.targetName +
+          '": ' +
+          (err instanceof Error ? err.message : String(err)) +
+          (rollbackFailed
+            ? " Some earlier artwork could not be rolled back automatically."
+            : " Earlier artwork changes were rolled back."),
+      };
+    }
+  }
+
+  return { success: true, renamed: completed.length };
+}
+
 async function renamePopsSubfolder(
   popsDir: string,
   oldTitle: string,
@@ -407,7 +588,10 @@ export async function normalizeRiptOplPs1Storage(params: {
 }> {
   const safeTitle = sanitizeGameFilename(params.canonicalTitle);
   if (!safeTitle) {
-    return { success: false, message: "Canonical PS1 title is empty after sanitization." };
+    return {
+      success: false,
+      message: "Canonical PS1 title is empty after sanitization.",
+    };
   }
 
   const sourcePath = path.resolve(params.sourcePath);
@@ -415,88 +599,150 @@ export async function normalizeRiptOplPs1Storage(params: {
     params.kind === "VCD"
       ? path.basename(sourcePath, path.extname(sourcePath))
       : path.basename(sourcePath);
-
-  if (currentName === safeTitle) {
-    return {
-      success: true,
-      changed: false,
-      newPath: sourcePath,
-      localName: safeTitle,
-    };
-  }
-
+  const storageNeedsRename = currentName !== safeTitle;
   const targetPath =
     params.kind === "VCD"
-      ? path.join(path.dirname(sourcePath), `${safeTitle}${path.extname(sourcePath)}`)
+      ? path.join(
+          path.dirname(sourcePath),
+          safeTitle + path.extname(sourcePath)
+        )
       : path.join(path.dirname(sourcePath), safeTitle);
-
-  const caseOnlyRename =
-    sourcePath !== targetPath &&
-    sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase();
-
-  if (!caseOnlyRename) {
-    try {
-      await fs.access(targetPath);
-      return {
-        success: false,
-        message: `Cannot normalize "${currentName}" because "${safeTitle}" already exists.`,
-      };
-    } catch (err: unknown) {
-      if (
-        !(err instanceof Error) ||
-        !("code" in err) ||
-        (err as NodeJS.ErrnoException).code !== "ENOENT"
-      ) {
-        return {
-          success: false,
-          message: `Could not check normalization target: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-    }
-  }
-
-  try {
-    if (caseOnlyRename) {
-      const tempPath = `${sourcePath}.orbit-rename-${process.pid}`;
-      await fs.rename(sourcePath, tempPath);
-      try {
-        await fs.rename(tempPath, targetPath);
-      } catch (err) {
-        await fs.rename(tempPath, sourcePath).catch(() => undefined);
-        throw err;
-      }
-    } else {
-      await fs.rename(sourcePath, targetPath);
-    }
-  } catch (err: unknown) {
-    return {
-      success: false,
-      message: `Failed to normalize ${params.kind} identity: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-
-  if (params.kind === "VCD") {
-    await renamePopsSubfolder(path.dirname(targetPath), currentName, safeTitle);
-  }
 
   const currentUpper = currentName.toUpperCase();
   const gameIdUpper = params.gameId.toUpperCase();
-  await renameMatchingCoverArt(
+
+  // Preflight every art destination before touching the VCD/folder. This
+  // prevents existing canonical art from being overwritten and also catches
+  // duplicate old-name/GameID art that would collapse onto the same slot.
+  const artworkPlan = await planMatchingCoverArtRenames(
     params.artDir,
     (nameBeforeType) => {
       const upper = nameBeforeType.toUpperCase();
-      return upper === currentUpper || (!!gameIdUpper && upper === gameIdUpper);
+      return (
+        upper === currentUpper ||
+        (!!gameIdUpper && upper === gameIdUpper)
+      );
     },
     safeTitle,
   );
+  if (artworkPlan.message) {
+    return { success: false, message: artworkPlan.message };
+  }
 
-  log.info(
-    `Normalized RiptOPL ${params.kind} identity: "${currentName}" → "${safeTitle}"`
+  if (storageNeedsRename) {
+    const caseOnlyRename =
+      sourcePath !== targetPath &&
+      sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase();
+
+    if (!caseOnlyRename) {
+      try {
+        await fs.access(targetPath);
+        return {
+          success: false,
+          message:
+            'Cannot normalize "' +
+            currentName +
+            '" because "' +
+            safeTitle +
+            '" already exists.',
+        };
+      } catch (err: unknown) {
+        if (
+          !(err instanceof Error) ||
+          !("code" in err) ||
+          (err as NodeJS.ErrnoException).code !== "ENOENT"
+        ) {
+          return {
+            success: false,
+            message:
+              "Could not check normalization target: " +
+              (err instanceof Error ? err.message : String(err)),
+          };
+        }
+      }
+    }
+
+    try {
+      await renameCaseAware(sourcePath, targetPath, "storage");
+    } catch (err: unknown) {
+      return {
+        success: false,
+        message:
+          "Failed to normalize " +
+          params.kind +
+          " identity: " +
+          (err instanceof Error ? err.message : String(err)),
+      };
+    }
+  }
+
+  const artworkResult = await executeArtworkRenamePlan(
+    artworkPlan.operations
   );
+  if (!artworkResult.success) {
+    if (storageNeedsRename) {
+      try {
+        await renameCaseAware(
+          targetPath,
+          sourcePath,
+          "storage-rollback"
+        );
+      } catch (rollbackErr: unknown) {
+        return {
+          success: false,
+          message:
+            artworkResult.message +
+            " Storage rollback also failed: " +
+            (rollbackErr instanceof Error
+              ? rollbackErr.message
+              : String(rollbackErr)),
+        };
+      }
+    }
+    return { success: false, message: artworkResult.message };
+  }
+
+  // VMC folders follow the VCD title. Do this after artwork commits so an
+  // artwork failure can still restore the VCD itself.
+  if (storageNeedsRename && params.kind === "VCD") {
+    await renamePopsSubfolder(
+      path.dirname(targetPath),
+      currentName,
+      safeTitle
+    );
+  }
+
+  const changed =
+    storageNeedsRename || artworkResult.renamed > 0;
+
+  if (artworkResult.renamed > 0) {
+    log.info(
+      "Renamed " +
+        artworkResult.renamed +
+        ' artwork file(s) in ' +
+        params.artDir +
+        ' to "' +
+        safeTitle +
+        '_*"'
+    );
+  }
+
+  if (changed) {
+    log.info(
+      "Normalized RiptOPL " +
+        params.kind +
+        ' identity: "' +
+        currentName +
+        '" → "' +
+        safeTitle +
+        '"'
+    );
+  }
+
   return {
     success: true,
-    changed: true,
-    newPath: targetPath,
+    changed,
+    newPath: storageNeedsRename ? targetPath : sourcePath,
     localName: safeTitle,
   };
 }
