@@ -262,7 +262,8 @@ export class LibraryService {
   private async resolveEmberDirectory(oplRoot: string): Promise<string | undefined> {
     const sep = oplRoot.includes('\\') ? '\\' : '/';
     const rootEmber = `${oplRoot.replace(/[\\/]$/, '')}${sep}EMBER`;
-    if (await window.libraryAPI.directoryExists(rootEmber).catch(() => false)) {
+    const rootGames = `${rootEmber}${sep}games`;
+    if (await window.libraryAPI.directoryExists(rootGames).catch(() => false)) {
       return rootEmber;
     }
 
