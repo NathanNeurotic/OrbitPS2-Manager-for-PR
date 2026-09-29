@@ -264,9 +264,6 @@ export class LibraryService {
     const sep = oplRoot.includes('\\') ? '\\' : '/';
     const rootEmber = `${oplRoot.replace(/[\\/]$/, '')}${sep}EMBER`;
     const rootGames = `${rootEmber}${sep}games`;
-    if (await window.libraryAPI.directoryExists(rootGames).catch(() => false)) {
-      return rootEmber;
-    }
 
     const settings = await this._settings.load();
     const configured = settings.emberDirectories?.[oplRoot];
@@ -275,6 +272,9 @@ export class LibraryService {
       (await window.libraryAPI.directoryExists(configured).catch(() => false))
     ) {
       return configured;
+    }
+    if (await window.libraryAPI.directoryExists(rootGames).catch(() => false)) {
+      return rootEmber;
     }
     return undefined;
   }
@@ -1033,12 +1033,19 @@ export class LibraryService {
       const currentDir = this.currentDirectory ?? '';
       const sep = currentDir.includes('\\') ? '\\' : '/';
       const artDir = `${currentDir.replace(/[\\/]$/, '')}${sep}ART`;
-      const result = await window.libraryAPI.deleteGameAndRelatedFiles(
-        game.path,
-        artDir,
-        game.gameId,
-        game.appFolder
-      );
+      const result =
+        game.format === 'EMBER'
+          ? await window.libraryAPI.deleteEmberGameAndRelatedFiles(
+              game.path,
+              artDir,
+              game.emberFolder || game.filename,
+            )
+          : await window.libraryAPI.deleteGameAndRelatedFiles(
+              game.path,
+              artDir,
+              game.gameId,
+              game.appFolder
+            );
 
       if (result.success) {
         this._logger.log('deleteGame', `Successfully deleted ${game.gameId}`);
