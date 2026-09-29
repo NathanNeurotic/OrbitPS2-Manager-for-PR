@@ -18,6 +18,14 @@ import { extractDiscZip, cleanupExtractedZip } from "../utils/zip-extract";
 
 const log = createLogger("game-id");
 
+export interface Ps1GameIdResult {
+  success: boolean;
+  gameId?: string;
+  formattedGameId?: string;
+  gameName?: string;
+  message?: string;
+}
+
 function readLe32(buffer: Buffer, offset: number): number {
   return (
     buffer[offset] |
@@ -438,7 +446,9 @@ export async function tryDeterminePs1GameIdFromVcd(
   }
 }
 
-export async function tryDeterminePs1GameIdFromHex(filepath: string) {
+export async function tryDeterminePs1GameIdFromHex(
+  filepath: string
+): Promise<Ps1GameIdResult> {
   let scanPath = filepath;
   let zipTempDir: string | null = null;
 
