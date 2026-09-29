@@ -1,5 +1,6 @@
 import { Game } from '@shared/types/game.type';
 import { ConfirmDialogOptions } from '@shared/services/confirm-dialog.service';
+import { sanitizeRiptOplPs1StorageName } from '@shared/utils/sanitize-game-filename';
 
 /** A PS1 storage name that normalization will change. */
 export interface Ps1CanonicalRename {
@@ -19,11 +20,41 @@ export function ps1StorageIdentity(game: Game): string | undefined {
   return undefined;
 }
 
+/**
+ * Artwork identities RiptOPL will actually try for this PS1 row.
+ *
+ * The storage name is always primary. VCDs additionally accept a GameID-keyed
+ * loose artwork fallback only when that same GameID is a strict prefix of the
+ * VCD filename. Ember has no GameID fallback because its folder name is the
+ * storage/config/art identity.
+ */
+export function ps1ArtworkIdentities(game: Game): string[] {
+  const primary = ps1StorageIdentity(game);
+  if (!primary) return [];
+
+  const identities = [primary];
+  if (game.format !== 'EMBER' && game.gameId) {
+    const stem = primary.toUpperCase();
+    const gameId = game.gameId.toUpperCase();
+    if (stem === gameId || stem.startsWith(`${gameId}.`)) {
+      identities.push(game.gameId);
+    }
+  }
+
+  return [...new Set(identities)];
+}
+
+export function ps1CanonicalStorageName(game: Game): string | undefined {
+  if (game.isPs1Launcher || !game.canonicalTitle) return undefined;
+  const kind = game.format === 'EMBER' ? 'EMBER' : 'VCD';
+  return sanitizeRiptOplPs1StorageName(game.canonicalTitle, kind);
+}
+
 /** The rename normalization will apply to this game, if any. */
 export function ps1CanonicalRename(game: Game): Ps1CanonicalRename | undefined {
   if (game.isPs1Launcher) return undefined;
   const from = ps1StorageIdentity(game);
-  const to = game.canonicalTitle;
+  const to = ps1CanonicalStorageName(game);
   return from && to && from !== to ? { from, to } : undefined;
 }
 
