@@ -1,0 +1,118 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import { normalizeRiptOplPs1Storage } from "./rename.service";
+
+async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orbit-riptopl-rename-"));
+  try {
+    await run(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("occupied canonical art stops normalization before storage is renamed", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const oldVcd = path.join(popsDir, "SPyro 4.VCD");
+    await fs.writeFile(oldVcd, "vcd");
+    await fs.writeFile(path.join(artDir, "SPyro 4_COV.png"), "old");
+    await fs.writeFile(
+      path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+      "canonical"
+    );
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: oldVcd,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.message ?? "", /already occupies the target slot/i);
+    assert.equal(await fs.readFile(oldVcd, "utf8"), "vcd");
+    assert.equal(
+      await fs.readFile(path.join(artDir, "SPyro 4_COV.png"), "utf8"),
+      "old"
+    );
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+        "utf8"
+      ),
+      "canonical"
+    );
+  });
+});
+
+test("canonical storage still migrates GameID-keyed artwork", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const vcd = path.join(popsDir, "SPYRO 2 - RIPTO'S RAGE.VCD");
+    await fs.writeFile(vcd, "vcd");
+    await fs.writeFile(path.join(artDir, "SCUS_944.25_COV.png"), "cover");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: vcd,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.changed, true);
+    assert.equal(await fs.readFile(vcd, "utf8"), "vcd");
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_COV.png"),
+        "utf8"
+      ),
+      "cover"
+    );
+    await assert.rejects(() =>
+      fs.access(path.join(artDir, "SCUS_944.25_COV.png"))
+    );
+  });
+});
+
+test("duplicate old-name and GameID artwork targeting one slot is refused", async () => {
+  await withTempDir(async (dir) => {
+    const gamesDir = path.join(dir, "EMBER", "games");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(gamesDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const gameFolder = path.join(gamesDir, "Spyro4");
+    await fs.mkdir(gameFolder);
+    await fs.writeFile(path.join(artDir, "Spyro4_COV.png"), "folder-art");
+    await fs.writeFile(path.join(artDir, "SCUS_944.25_COV.jpg"), "id-art");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "EMBER",
+      sourcePath: gameFolder,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.message ?? "", /would become the same/i);
+    await fs.access(gameFolder);
+    await fs.access(path.join(artDir, "Spyro4_COV.png"));
+    await fs.access(path.join(artDir, "SCUS_944.25_COV.jpg"));
+  });
+});
