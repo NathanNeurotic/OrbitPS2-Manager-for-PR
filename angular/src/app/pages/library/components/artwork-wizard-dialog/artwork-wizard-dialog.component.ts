@@ -86,6 +86,8 @@ export class ArtworkWizardDialogComponent {
 
   /** Save bases already present in the ART folder, e.g. `SCR`, `SCR2`, `COV`. */
   private readonly existingSaveFiles = signal<ReadonlySet<string>>(new Set());
+  /** Prevent duplicate normalize/download jobs while the rename prompt is open. */
+  private confirmingRename = false;
 
   /**
    * File base every option is written under. The selected types are listed
@@ -595,11 +597,18 @@ export class ArtworkWizardDialogComponent {
       return;
     }
 
-    void this._confirm.confirm(ps1CanonicalRenameConfirm([rename])).then((proceed) => {
-      if (!proceed) return;
-      this._jobs.enqueue([job]);
-      this.close();
-    });
+    if (this.confirmingRename) return;
+    this.confirmingRename = true;
+    void this._confirm
+      .confirm(ps1CanonicalRenameConfirm([rename]))
+      .then((proceed) => {
+        if (!proceed) return;
+        this._jobs.enqueue([job]);
+        this.close();
+      })
+      .finally(() => {
+        this.confirmingRename = false;
+      });
   }
 
   close(): void {
