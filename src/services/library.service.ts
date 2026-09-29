@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import path from "path";
 import { createLogger, formatBytes } from "../logger";
 import { isDirectoryEntry } from "../utils/fs-entry";
+import { parseArtworkBaseName } from "../utils/artwork-name";
 import { tryDeterminePs1GameIdFromHex } from "./game-id-resolver.service";
 
 const log = createLogger("library");
@@ -350,9 +351,9 @@ export async function getArtFolder(dirpath: string) {
               return null;
             }
             const baseName = path.parse(item.name).name;
-            const lastUnderscoreIdx = baseName.lastIndexOf("_");
-            const type = lastUnderscoreIdx >= 0 ? baseName.slice(lastUnderscoreIdx + 1) : "";
-            const nameBeforeType = lastUnderscoreIdx >= 0 ? baseName.slice(0, lastUnderscoreIdx) : baseName;
+            const parsed = parseArtworkBaseName(baseName);
+            const type = parsed?.type ?? "";
+            const nameBeforeType = parsed?.identity ?? baseName;
             const idMatch = nameBeforeType.match(/([A-Z]{4}_\d{3}\.\d{2})/i);
             const gameId = idMatch ? idMatch[1] : nameBeforeType;
             return {
