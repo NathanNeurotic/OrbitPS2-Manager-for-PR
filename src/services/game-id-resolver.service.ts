@@ -54,6 +54,46 @@ function readLe32(buffer: Buffer, offset: number): number {
 
 const ISO_BLOCK_SIZE = 2048;
 
+
+function fromBcd(value: number): number {
+  return Math.floor(value / 16) * 10 + (value % 16);
+}
+
+/**
+ * POPS VCD payloads normally begin with track 1 at byte 0, but a CUE may
+ * preserve a non-zero INDEX 01 pregap in the BIN. cue2pops stores track 1's
+ * INDEX 01 in the VCD header with its +2 second adjustment, so undo that here
+ * before traversing ISO9660 structures inside the payload.
+ */
+async function ps1VcdDataOffset(fileHandle: fs.FileHandle): Promise<number> {
+  const header = Buffer.alloc(40);
+  const signature = Buffer.alloc(4);
+  const [headRead, sigRead] = await Promise.all([
+    fileHandle.read(header, 0, header.length, 0),
+    fileHandle.read(signature, 0, signature.length, 1024),
+  ]);
+
+  if (
+    headRead.bytesRead < header.length ||
+    sigRead.bytesRead < signature.length ||
+    signature.toString("ascii") !== "kHn "
+  ) {
+    return VCD_HEADER_SIZE;
+  }
+
+  const trackCount = fromBcd(header[17]);
+  if (!trackCount || header[30] !== 0x41) {
+    return VCD_HEADER_SIZE;
+  }
+
+  const mm = fromBcd(header[37]);
+  const ss = fromBcd(header[38]);
+  const ff = fromBcd(header[39]);
+  const adjustedFrames = mm * 60 * 75 + ss * 75 + ff;
+  const payloadFrames = Math.max(0, adjustedFrames - 2 * 75);
+  return VCD_HEADER_SIZE + payloadFrames * 2352;
+}
+
 /**
  * Sector layouts a PS1 image can use. `dataOffset` is where the 2048 bytes of
  * user data start inside each physical sector:
@@ -545,15 +585,16 @@ export async function tryDeterminePs1GameIdFromVcd(
   }
 
   try {
+    const dataOffset = await ps1VcdDataOffset(fileHandle);
     const systemCnfId = await tryReadPs1IdFromSystemCnf(
       fileHandle,
-      VCD_HEADER_SIZE,
+      dataOffset,
     );
     if (systemCnfId) {
       const result = await resolvePs1Candidate(
         filepath,
         systemCnfId,
-        VCD_HEADER_SIZE,
+        dataOffset,
         "boot",
       );
       log.verbose(
@@ -565,13 +606,13 @@ export async function tryDeterminePs1GameIdFromVcd(
 
     const pvd = await tryReadPs1IdFromPvdTimestamp(
       fileHandle,
-      VCD_HEADER_SIZE,
+      dataOffset,
     );
     if (pvd) {
       const result = await resolvePs1Candidate(
         filepath,
         pvd.gameId,
-        VCD_HEADER_SIZE,
+        dataOffset,
         "pvd",
         ps1PvdDiscTitle(pvd.timestamp),
       );
