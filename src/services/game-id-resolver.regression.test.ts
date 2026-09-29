@@ -1,0 +1,162 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import { tryDeterminePs1GameIdFromHex } from "./game-id-resolver.service";
+
+type Layout = "iso" | "mode2";
+const BLOCK = 2048;
+
+function directoryRecord(lba: number, size: number, name: string): Buffer {
+  const nameBytes = Buffer.from(name, "latin1");
+  const length = 33 + nameBytes.length + (nameBytes.length % 2 === 0 ? 1 : 0);
+  const record = Buffer.alloc(length);
+  record[0] = length;
+  record.writeUInt32LE(lba, 2);
+  record.writeUInt32BE(lba, 6);
+  record.writeUInt32LE(size, 10);
+  record.writeUInt32BE(size, 14);
+  record[25] = name === "\0" || name === "\x01" ? 2 : 0;
+  record[32] = nameBytes.length;
+  nameBytes.copy(record, 33);
+  return record;
+}
+
+function buildPs1Image(
+  layout: Layout,
+  bootId: string,
+  decoyId: string,
+  pvdTimestamp?: string,
+  systemCnfExtra = "",
+): Buffer {
+  const sectorSize = layout === "iso" ? BLOCK : 2352;
+  const dataOffset = layout === "iso" ? 0 : 24;
+  const image = Buffer.alloc(40 * sectorSize);
+  const block = (lba: number) =>
+    image.subarray(lba * sectorSize + dataOffset, lba * sectorSize + dataOffset + BLOCK);
+
+  block(10).write(`MENU ${decoyId} DEMO`, "latin1");
+
+  const rootLba = 18;
+  const systemCnfLba = 22;
+  const systemCnf =
+    `BOOT = cdrom:\\${bootId};1\r\n` +
+    systemCnfExtra +
+    "TCB = 4\r\nEVENT = 10\r\n";
+
+  const pvd = block(16);
+  pvd[0] = 1;
+  pvd.write("CD001", 1, "ascii");
+  if (pvdTimestamp) pvd.write(pvdTimestamp, 0x32d, "ascii");
+  directoryRecord(rootLba, BLOCK, "\0").copy(pvd, 156);
+
+  const root = block(rootLba);
+  let offset = 0;
+  offset += directoryRecord(rootLba, BLOCK, "\0").copy(root, offset);
+  offset += directoryRecord(rootLba, BLOCK, "\x01").copy(root, offset);
+  directoryRecord(systemCnfLba, systemCnf.length, "SYSTEM.CNF;1").copy(root, offset);
+  block(systemCnfLba).write(systemCnf, "latin1");
+  return image;
+}
+
+async function withTempFile(
+  name: string,
+  contents: Buffer,
+  run: (filePath: string) => Promise<void>,
+): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orbit-ps1-regression-"));
+  try {
+    const filePath = path.join(dir, name);
+    await fs.writeFile(filePath, contents);
+    await run(filePath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("unknown generic PSX.EXE cannot fall through to an unrelated raw serial", async () => {
+  await withTempFile(
+    "generic-unknown.bin",
+    buildPs1Image("mode2", "PSX.EXE", "SCUS_941.63", "2000010100000000"),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, false);
+      assert.equal(result.identificationStatus, "unidentified");
+      assert.equal(result.gameId, undefined);
+    },
+  );
+});
+
+test("SYSTEM.CNF comments cannot override the generic-boot PVD identity", async () => {
+  await withTempFile(
+    "generic-comment.bin",
+    buildPs1Image(
+      "iso",
+      "PSX.EXE",
+      "SCUS_941.63",
+      "1994111009000000",
+      "# SCUS_941.63 belongs to another menu/demo\r\n",
+    ),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, true);
+      assert.equal(result.gameId, "SLPS_000.01");
+      assert.equal(result.identificationMethod, "pvd");
+      assert.equal(result.identificationStatus, "identified");
+    },
+  );
+});
+
+test("CUE INDEX 01 offset is respected for the PS1 data track", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orbit-ps1-cue-offset-"));
+  try {
+    const binPath = path.join(dir, "shifted.bin");
+    const cuePath = path.join(dir, "shifted.cue");
+    const payload = buildPs1Image("mode2", "SLUS_000.67", "SCUS_941.63");
+    await fs.writeFile(binPath, Buffer.concat([Buffer.alloc(150 * 2352), payload]));
+    await fs.writeFile(
+      cuePath,
+      'FILE "shifted.bin" BINARY\n' +
+        "  TRACK 01 MODE2/2352\n" +
+        "    INDEX 00 00:00:00\n" +
+        "    INDEX 01 00:02:00\n",
+    );
+
+    const result = await tryDeterminePs1GameIdFromHex(cuePath);
+    assert.equal(result.success, true);
+    assert.equal(result.gameId, "SLUS_000.67");
+    assert.equal(result.identificationMethod, "boot");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("known shared PS1 serial remains ambiguous when checksum evidence is unknown", async () => {
+  await withTempFile(
+    "alive-synthetic.bin",
+    buildPs1Image("mode2", "SLPS_015.27", "SCUS_941.63"),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, true);
+      assert.equal(result.gameId, "SLPS_015.27");
+      assert.equal(result.identificationStatus, "ambiguous");
+      assert.equal(result.gameName, undefined);
+    },
+  );
+});
+
+test("PVD identification preserves Cyberwar's disc-specific title", async () => {
+  await withTempFile(
+    "cyberwar-disc2.bin",
+    buildPs1Image("mode2", "PSX.EXE", "SCUS_941.63", "1995060319142200"),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, true);
+      assert.equal(result.gameId, "SLPS_000.55");
+      assert.equal(result.gameName, "CYBERWAR - DISC 2");
+      assert.equal(result.identificationStatus, "identified");
+      assert.equal(result.identificationMethod, "pvd");
+    },
+  );
+});
