@@ -3,6 +3,7 @@ import { LogsService } from './logs.service';
 import { SettingsService } from './settings.service';
 import { BehaviorSubject, map, Observable } from 'rxjs';
 import { Game, GameFormat, Ps1LauncherInfo, RawGameFile, gameArt } from '../types/game.type';
+import { sanitizeGameFilename } from '../utils/sanitize-game-filename';
 
 @Injectable({
   providedIn: 'root',
@@ -576,7 +577,9 @@ export class LibraryService {
     return entries.map((entry) => ({
       filename: entry.folderName,
       title: entry.gameName || entry.folderName,
-      canonicalTitle: entry.gameName,
+      canonicalTitle: entry.gameName
+        ? sanitizeGameFilename(entry.gameName)
+        : undefined,
       cdType: 'EMBER',
       gameId: entry.gameId || '',
       region: entry.gameId ? this.mapGameIdToRegion(entry.gameId) : 'UNKNOWN',
@@ -640,7 +643,9 @@ export class LibraryService {
       const resolved = await window.libraryAPI.tryDeterminePs1GameIdFromVcd(file.path);
       if (resolved?.success && resolved.gameId) {
         gameId = resolved.gameId;
-        canonicalTitle = resolved.gameName;
+        canonicalTitle = resolved.gameName
+          ? sanitizeGameFilename(resolved.gameName)
+          : undefined;
         title = resolved.gameName || file.name;
       } else if (ps1Launcher?.gameId) {
         gameId = ps1Launcher.gameId;
@@ -656,7 +661,9 @@ export class LibraryService {
       const resolved = await window.libraryAPI.tryDeterminePs1GameIdFromVcd(file.path);
       if (resolved?.success && resolved.gameId) {
         gameId = resolved.gameId;
-        canonicalTitle = resolved.gameName;
+        canonicalTitle = resolved.gameName
+          ? sanitizeGameFilename(resolved.gameName)
+          : undefined;
         title = resolved.gameName || title;
       }
     }
