@@ -216,13 +216,17 @@ declare interface Window {
       discId?: string;
     }>;
 
-    /** Try to determine PS1 game ID from a VCD file. */
+    /** Identify a PS1 disc from a POPS VCD payload. */
     tryDeterminePs1GameIdFromVcd: (filepath: string) => Promise<{
       success: boolean;
       gameId?: string;
       formattedGameId?: string;
       gameName?: string;
       message?: string;
+      identificationStatus?: 'identified' | 'ambiguous' | 'unidentified';
+      identificationMethod?: 'boot' | 'pvd' | 'md5';
+      internalGameId?: string;
+      discId?: string;
     }>;
 
     /**
