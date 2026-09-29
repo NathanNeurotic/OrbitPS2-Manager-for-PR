@@ -4,6 +4,7 @@ import { SettingsService } from './settings.service';
 import { BehaviorSubject, map, Observable } from 'rxjs';
 import { Game, GameFormat, Ps1LauncherInfo, RawGameFile, gameArt } from '../types/game.type';
 import { sanitizeGameFilename } from '../utils/sanitize-game-filename';
+import { ps1ArtworkIdentities } from '../utils/ps1-canonical-rename';
 
 @Injectable({
   providedIn: 'root',
@@ -704,8 +705,9 @@ export class LibraryService {
 
   /**
    * Match artwork from the /ART directory against every game in the list.
-   * PS1 launcher apps are matched by boot ELF name, PS1 POPSLoader/RiptOPL
-   * VCDs by title (falling back to gameId), and everything else by gameId.
+   * PS1 launcher apps are matched by full boot ELF filename. PS1 VCD/Ember
+   * rows use the exact identities RiptOPL can resolve; VCD GameID fallback is
+   * accepted only when the GameID is a strict prefix of that VCD filename.
    */
   private matchArtForGames(games: Game[], artFiles: gameArt[]): void {
     for (const game of games) {
@@ -719,16 +721,10 @@ export class LibraryService {
         game.art = artFiles.filter(
           (art: gameArt) => art.gameId === game.filename,
         );
-      } else if (game.format === 'EMBER' && game.emberFolder) {
+      } else if (game.system === 'PS1') {
+        const accepted = new Set(ps1ArtworkIdentities(game));
         game.art = artFiles.filter(
-          (art: gameArt) => art.gameId === game.emberFolder,
-        );
-      } else if (game.system === 'PS1' && game.filename) {
-        // POPSLoader/RiptOPL VCDs carry no GameID in their filename, so their
-        // art is saved under the VCD's title instead — match either convention.
-        const filenameNoExt = game.filename.replace(/\.[^./\\]+$/, '');
-        game.art = artFiles.filter(
-          (art: gameArt) => art.gameId === game.gameId || art.gameId === filenameNoExt,
+          (art: gameArt) => accepted.has(art.gameId),
         );
       } else {
         game.art = artFiles.filter(
@@ -836,19 +832,17 @@ export class LibraryService {
             .map((art: gameArt) => art),
         };
       }
-      if (game.format === 'EMBER' && game.emberFolder) {
+      if (game.system === 'APPS' && game.filename) {
         return {
           ...game,
-          art: artFiles.filter((art: gameArt) => art.gameId === game.emberFolder),
+          art: artFiles.filter((art: gameArt) => art.gameId === game.filename),
         };
       }
-      if (game.system === 'PS1' && game.filename) {
-        const filenameNoExt = game.filename.replace(/\.[^./\\]+$/, '');
+      if (game.system === 'PS1') {
+        const accepted = new Set(ps1ArtworkIdentities(game));
         return {
           ...game,
-          art: artFiles.filter(
-            (art: gameArt) => art.gameId === game.gameId || art.gameId === filenameNoExt,
-          ),
+          art: artFiles.filter((art: gameArt) => accepted.has(art.gameId)),
         };
       }
       return {
