@@ -58,34 +58,7 @@ export function resolveKnownPs1ConflictDigest(
   };
 }
 
-async function md5Segments(
-  filePath: string,
-  segments: Array<{ start: number; length: number }>,
-): Promise<string | null> {
-  const handle = await fs.open(filePath, "r");
-  try {
-    const hash = createHash("md5");
-    const buffer = Buffer.alloc(1024 * 1024);
-
-    for (const segment of segments) {
-      if (segment.start < 0 || segment.length < 0) return null;
-      let position = segment.start;
-      let remaining = segment.length;
-      while (remaining > 0) {
-        const requested = Math.min(buffer.length, remaining);
-        const { bytesRead } = await handle.read(buffer, 0, requested, position);
-        if (bytesRead <= 0) return null;
-        hash.update(buffer.subarray(0, bytesRead));
-        position += bytesRead;
-        remaining -= bytesRead;
-      }
-    }
-
-    return hash.digest("hex");
-  } finally {
-    await handle.close();
-  }
-}
+const conflictDigestCache = new Map<string, string[]>();
 
 function fromBcd(value: number): number {
   return Math.floor(value / 16) * 10 + (value % 16);
@@ -150,13 +123,18 @@ async function vcdInsertedGapOffset(
   }
 }
 
+/**
+ * Compute every checksum shape needed by the shared-serial rules in one
+ * sequential read. POPS VCDs contribute the exact file, direct payload, and
+ * gap-reconstructed payload candidates without rereading the whole image.
+ */
 async function wholeInputMd5Candidates(
   filePath: string,
-  fileSize: number,
+  stat: { size: number; mtimeMs: number },
 ): Promise<string[]> {
-  const digests: string[] = [];
-  const exact = await md5Range(filePath, 0, fileSize);
-  if (exact) digests.push(exact);
+  const cacheKey = `${filePath}\0${stat.size}\0${stat.mtimeMs}`;
+  const cached = conflictDigestCache.get(cacheKey);
+  if (cached) return [...cached];
 
   const handle = await fs.open(filePath, "r");
   let isVcd = false;
@@ -169,58 +147,78 @@ async function wholeInputMd5Candidates(
     await handle.close();
   }
 
-  if (!isVcd) {
-    return digests;
-  }
-  const payloadSize = fileSize - VCD_HEADER_SIZE;
-  const direct = await md5Range(filePath, VCD_HEADER_SIZE, payloadSize);
-  if (direct && !digests.includes(direct)) digests.push(direct);
+  const gapOffset = isVcd
+    ? await vcdInsertedGapOffset(filePath, stat.size)
+    : null;
+  const gapSize = 150 * 2352;
+  const gapStart =
+    gapOffset === null ? -1 : VCD_HEADER_SIZE + gapOffset;
+  const gapEnd = gapStart < 0 ? -1 : gapStart + gapSize;
 
-  const gapOffset = await vcdInsertedGapOffset(filePath, fileSize);
-  if (gapOffset !== null) {
-    const gapSize = 150 * 2352;
-    const reconstructed = await md5Segments(filePath, [
-      { start: VCD_HEADER_SIZE, length: gapOffset },
-      {
-        start: VCD_HEADER_SIZE + gapOffset + gapSize,
-        length: payloadSize - gapOffset - gapSize,
-      },
-    ]);
-    if (reconstructed && !digests.includes(reconstructed)) {
-      digests.push(reconstructed);
-    }
-  }
+  const fullHash = createHash("md5");
+  const payloadHash = isVcd ? createHash("md5") : null;
+  const reconstructedHash =
+    isVcd && gapOffset !== null ? createHash("md5") : null;
 
-  return digests;
-}
-
-async function md5Range(
-  filePath: string,
-  start: number,
-  length: number,
-): Promise<string | null> {
-  if (start < 0 || length < 0) return null;
-
-  const handle = await fs.open(filePath, "r");
+  const reader = await fs.open(filePath, "r");
   try {
-    const hash = createHash("md5");
     const buffer = Buffer.alloc(1024 * 1024);
-    let position = start;
-    let remaining = length;
+    let position = 0;
+    while (position < stat.size) {
+      const requested = Math.min(buffer.length, stat.size - position);
+      const { bytesRead } = await reader.read(buffer, 0, requested, position);
+      if (bytesRead <= 0) {
+        throw new Error("Unexpected end of file while hashing PS1 image.");
+      }
+      const chunk = buffer.subarray(0, bytesRead);
+      fullHash.update(chunk);
 
-    while (remaining > 0) {
-      const requested = Math.min(buffer.length, remaining);
-      const { bytesRead } = await handle.read(buffer, 0, requested, position);
-      if (bytesRead <= 0) return null;
-      hash.update(buffer.subarray(0, bytesRead));
+      if (isVcd) {
+        const chunkStart = position;
+        const chunkEnd = position + bytesRead;
+        const payloadStart = Math.max(chunkStart, VCD_HEADER_SIZE);
+        if (payloadStart < chunkEnd) {
+          const payloadSlice = chunk.subarray(
+            payloadStart - chunkStart,
+            chunkEnd - chunkStart,
+          );
+          payloadHash!.update(payloadSlice);
+        }
+
+        if (reconstructedHash && payloadStart < chunkEnd) {
+          const beforeGapEnd = Math.min(chunkEnd, gapStart);
+          if (payloadStart < beforeGapEnd) {
+            reconstructedHash.update(
+              chunk.subarray(payloadStart - chunkStart, beforeGapEnd - chunkStart),
+            );
+          }
+          const afterGapStart = Math.max(payloadStart, gapEnd);
+          if (afterGapStart < chunkEnd) {
+            reconstructedHash.update(
+              chunk.subarray(afterGapStart - chunkStart, chunkEnd - chunkStart),
+            );
+          }
+        }
+      }
+
       position += bytesRead;
-      remaining -= bytesRead;
     }
-
-    return hash.digest("hex");
   } finally {
-    await handle.close();
+    await reader.close();
   }
+
+  const digests = [fullHash.digest("hex")];
+  if (payloadHash) {
+    const direct = payloadHash.digest("hex");
+    if (!digests.includes(direct)) digests.push(direct);
+  }
+  if (reconstructedHash) {
+    const reconstructed = reconstructedHash.digest("hex");
+    if (!digests.includes(reconstructed)) digests.push(reconstructed);
+  }
+
+  conflictDigestCache.set(cacheKey, [...digests]);
+  return digests;
 }
 
 /**
@@ -245,7 +243,10 @@ export async function matchPs1Conflict(
   );
 
   if (fullRules.length > 0) {
-    const digests = await wholeInputMd5Candidates(filePath, stat.size);
+    const digests = await wholeInputMd5Candidates(filePath, {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    });
     for (const digest of digests) {
       const match = resolveKnownPs1ConflictDigest(internalId, digest);
       if (match) return match;
