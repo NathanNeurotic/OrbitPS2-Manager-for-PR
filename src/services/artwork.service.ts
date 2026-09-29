@@ -145,17 +145,28 @@ export async function downloadArtByGameId(
       try {
         // Custom downloaders are the unit-test seam for URL/fallback behavior
         // and may return sentinel bytes rather than image data. Production uses
-        // downloadBuffer and always normalizes the real database PNG before it
-        // reaches disk.
+        // downloadBuffer and normalizes real database PNGs before disk writes.
         outputBuffer =
           downloader === downloadBuffer
             ? normalizeArtworkPng(buffer, system, saveType)
             : buffer;
+      } catch (err: any) {
+        // A database candidate can be a valid PNG but incompatible with
+        // RiptOPL's 8-bit indexed requirement. That does not make the slot
+        // unwritable, so continue to the next candidate instead of aborting the
+        // whole type before a compatible fallback can be tried.
+        lastError = new Error(
+          `Skipped incompatible ${type} candidate ${fileName}: ${err.message}`
+        );
+        log.warn(lastError.message);
+        continue;
+      }
+
+      try {
         await fs.writeFile(savePath, outputBuffer);
       } catch (err: any) {
-        // The bytes are already in hand, so a local transform/write failure says
-        // nothing about the remaining candidates: fetching them again would
-        // only re-download another incompatible copy.
+        // A local write failure will affect every remaining candidate for this
+        // slot, so stop retrying network URLs.
         lastError = new Error(
           `Failed to save ${type} artwork to ${savePath}: ${err.message}`
         );
