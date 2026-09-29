@@ -143,7 +143,14 @@ export async function downloadArtByGameId(
 
       let outputBuffer: Buffer;
       try {
-        outputBuffer = normalizeArtworkPng(buffer, system, saveType);
+        // Custom downloaders are the unit-test seam for URL/fallback behavior
+        // and may return sentinel bytes rather than image data. Production uses
+        // downloadBuffer and always normalizes the real database PNG before it
+        // reaches disk.
+        outputBuffer =
+          downloader === downloadBuffer
+            ? normalizeArtworkPng(buffer, system, saveType)
+            : buffer;
         await fs.writeFile(savePath, outputBuffer);
       } catch (err: any) {
         // The bytes are already in hand, so a local transform/write failure says
