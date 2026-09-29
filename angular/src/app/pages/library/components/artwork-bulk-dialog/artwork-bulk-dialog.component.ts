@@ -15,7 +15,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LucideAngularModule } from 'lucide-angular';
 import { LibraryService } from '@shared/services/library.service';
 import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
-import { KNOWN_ART_TYPES, artTypeLabel } from '@shared/constants/artwork-presets';
+import {
+  KNOWN_ART_TYPES,
+  artSaveNamesForSelection,
+  artTypeLabel,
+} from '@shared/constants/artwork-presets';
 import {
   ImportJob,
   JobLogEntry,
@@ -365,6 +369,9 @@ export class ArtworkBulkDialogComponent implements OnInit {
   }
 
   private enqueueTargets(targets: ArtTarget[]) {
+    const artSaveAsOverrides = Object.fromEntries(
+      artSaveNamesForSelection(this.artTypes()),
+    );
     const created = this._jobs.enqueue(
       targets.map((t) => ({
         type: 'artwork' as const,
@@ -379,6 +386,7 @@ export class ArtworkBulkDialogComponent implements OnInit {
         canonicalName: t.canonicalName,
         overwrite: this.overwrite(),
         artTypes: [...this.artTypes()],
+        artSaveAsOverrides,
         wideSlotFallback: true,
       })),
     );
