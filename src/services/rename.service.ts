@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import path from "path";
 import { createLogger } from "../logger";
 import { sanitizeGameFilename } from "../utils/sanitize";
+import { parseArtworkBaseName } from "../utils/artwork-name";
 import { findPopstarterElf } from "./ps1-import.service";
 
 const log = createLogger("rename");
@@ -76,13 +77,10 @@ async function renameMatchingCoverArt(
     const ext = path.extname(name);
     if (!/^\.(png|jpe?g)$/i.test(ext)) continue;
     const baseName = name.slice(0, -ext.length);
-    const lastUnderscore = baseName.lastIndexOf("_");
-    if (lastUnderscore < 0) continue;
-    const nameBeforeType = baseName.slice(0, lastUnderscore);
-    const type = baseName.slice(lastUnderscore + 1);
-    if (!matches(nameBeforeType)) continue;
+    const parsed = parseArtworkBaseName(baseName);
+    if (!parsed || !matches(parsed.identity)) continue;
 
-    const newName = `${newBaseName}_${type}${ext}`;
+    const newName = `${newBaseName}_${parsed.type}${ext}`;
     if (newName === name) continue;
     try {
       await fs.rename(path.join(artDir, name), path.join(artDir, newName));
@@ -143,14 +141,10 @@ async function planMatchingCoverArtRenames(
 
     const ext = path.extname(name);
     const baseName = name.slice(0, -ext.length);
-    const lastUnderscore = baseName.lastIndexOf("_");
-    if (lastUnderscore < 0) continue;
+    const parsed = parseArtworkBaseName(baseName);
+    if (!parsed || !matches(parsed.identity)) continue;
 
-    const nameBeforeType = baseName.slice(0, lastUnderscore);
-    const type = baseName.slice(lastUnderscore + 1);
-    if (!matches(nameBeforeType)) continue;
-
-    const targetName = newBaseName + "_" + type + ext;
+    const targetName = newBaseName + "_" + parsed.type + ext;
     if (targetName === name) continue;
 
     const sourceLower = name.toLocaleLowerCase();
