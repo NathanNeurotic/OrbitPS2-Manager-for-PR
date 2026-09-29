@@ -430,27 +430,44 @@ export async function normalizeRiptOplPs1Storage(params: {
       ? path.join(path.dirname(sourcePath), `${safeTitle}${path.extname(sourcePath)}`)
       : path.join(path.dirname(sourcePath), safeTitle);
 
-  try {
-    await fs.access(targetPath);
-    return {
-      success: false,
-      message: `Cannot normalize "${currentName}" because "${safeTitle}" already exists.`,
-    };
-  } catch (err: unknown) {
-    if (
-      !(err instanceof Error) ||
-      !("code" in err) ||
-      (err as NodeJS.ErrnoException).code !== "ENOENT"
-    ) {
+  const caseOnlyRename =
+    sourcePath !== targetPath &&
+    sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase();
+
+  if (!caseOnlyRename) {
+    try {
+      await fs.access(targetPath);
       return {
         success: false,
-        message: `Could not check normalization target: ${err instanceof Error ? err.message : String(err)}`,
+        message: `Cannot normalize "${currentName}" because "${safeTitle}" already exists.`,
       };
+    } catch (err: unknown) {
+      if (
+        !(err instanceof Error) ||
+        !("code" in err) ||
+        (err as NodeJS.ErrnoException).code !== "ENOENT"
+      ) {
+        return {
+          success: false,
+          message: `Could not check normalization target: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
     }
   }
 
   try {
-    await fs.rename(sourcePath, targetPath);
+    if (caseOnlyRename) {
+      const tempPath = `${sourcePath}.orbit-rename-${process.pid}`;
+      await fs.rename(sourcePath, tempPath);
+      try {
+        await fs.rename(tempPath, targetPath);
+      } catch (err) {
+        await fs.rename(tempPath, sourcePath).catch(() => undefined);
+        throw err;
+      }
+    } else {
+      await fs.rename(sourcePath, targetPath);
+    }
   } catch (err: unknown) {
     return {
       success: false,

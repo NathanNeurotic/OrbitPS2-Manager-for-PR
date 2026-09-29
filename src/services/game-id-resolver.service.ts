@@ -18,6 +18,97 @@ import { extractDiscZip, cleanupExtractedZip } from "../utils/zip-extract";
 
 const log = createLogger("game-id");
 
+function readLe32(buffer: Buffer, offset: number): number {
+  return (
+    buffer[offset] |
+    (buffer[offset + 1] << 8) |
+    (buffer[offset + 2] << 16) |
+    (buffer[offset + 3] << 24)
+  ) >>> 0;
+}
+
+/**
+ * RetroGem-compatible primary PS1 identity path: locate the ISO9660 PVD,
+ * traverse the root directory for SYSTEM.CNF, then read the BOOT target.
+ *
+ * Supports both 2048-byte ISO sectors and raw 2352-byte BIN sectors. The base
+ * offset lets the same parser operate on POPS VCD payloads after the 1 MiB header.
+ */
+async function tryReadPs1IdFromSystemCnf(
+  fileHandle: fs.FileHandle,
+  baseOffset = 0
+): Promise<string | null> {
+  const layouts = [
+    { pvdOffset: baseOffset + 16 * 2048, sectorSize: 2048, modeOffset: 0 },
+    { pvdOffset: baseOffset + 16 * 2352 + 16, sectorSize: 2352, modeOffset: 16 },
+  ];
+
+  for (const layout of layouts) {
+    const pvd = Buffer.alloc(2048);
+    const pvdRead = await fileHandle.read(pvd, 0, pvd.length, layout.pvdOffset);
+    if (
+      pvdRead.bytesRead !== pvd.length ||
+      pvd[0] !== 0x01 ||
+      pvd.subarray(1, 6).toString("ascii") !== "CD001"
+    ) {
+      continue;
+    }
+
+    const rootLba = readLe32(pvd, 158);
+    const rootLen = readLe32(pvd, 166);
+    if (rootLen <= 0 || rootLen > 32768) continue;
+
+    const rootOffset =
+      baseOffset + rootLba * layout.sectorSize + layout.modeOffset;
+    const dirBuf = Buffer.alloc(rootLen);
+    const dirRead = await fileHandle.read(dirBuf, 0, rootLen, rootOffset);
+    if (dirRead.bytesRead !== rootLen) continue;
+
+    let off = 0;
+    while (off < rootLen) {
+      const recLen = dirBuf[off];
+      if (recLen === 0) {
+        off = (Math.floor(off / layout.sectorSize) + 1) * layout.sectorSize;
+        continue;
+      }
+      if (off + recLen > rootLen || off + 33 > rootLen) break;
+
+      const nameLen = dirBuf[off + 32];
+      if (nameLen > 0 && off + 33 + nameLen <= rootLen) {
+        const name = dirBuf
+          .subarray(off + 33, off + 33 + nameLen)
+          .toString("ascii")
+          .toUpperCase();
+
+        if (name.startsWith("SYSTEM.CNF")) {
+          const sysLba = readLe32(dirBuf, off + 2);
+          const sysSize = readLe32(dirBuf, off + 10);
+          if (sysSize > 0 && sysSize < 4096) {
+            const sysOffset =
+              baseOffset + sysLba * layout.sectorSize + layout.modeOffset;
+            const sysBuf = Buffer.alloc(sysSize);
+            const sysRead = await fileHandle.read(
+              sysBuf,
+              0,
+              sysSize,
+              sysOffset
+            );
+            if (sysRead.bytesRead === sysSize) {
+              const text = sysBuf.toString("latin1");
+              PS1_GAME_ID_REGEX.lastIndex = 0;
+              const match = text.match(PS1_GAME_ID_REGEX)?.[0];
+              if (match) return match.replace("-", "_").replace(/;1$/i, "");
+            }
+          }
+        }
+      }
+      off += recLen;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Resolves the PS2 game ID for an ISO that doesn't carry the GAMEID prefix
  * in its filename (the "new" OPL naming convention — OPL reads the ID from
@@ -260,6 +351,22 @@ export async function tryDeterminePs1GameIdFromVcd(
   }
 
   try {
+    const systemCnfId = await tryReadPs1IdFromSystemCnf(fileHandle, VCD_HEADER_SIZE);
+    if (systemCnfId) {
+      const lookupId = normaliseGameIdForLookup(systemCnfId);
+      const gameName = await findPs1GameName(lookupId);
+      log.verbose(
+        `PS1 VCD scan: SYSTEM.CNF resolved ${systemCnfId}` +
+          (gameName ? ` (${gameName})` : "")
+      );
+      return {
+        success: true,
+        gameId: systemCnfId,
+        formattedGameId: lookupId,
+        ...(gameName ? { gameName } : {}),
+      };
+    }
+
     log.verbose(`PS1 VCD scan: reading ${path.basename(filepath)} from offset 1 MB (VCD header skip)`);
     const buffer = Buffer.alloc(FILE_SCAN_CHUNK_BYTES);
     let position = VCD_HEADER_SIZE;
@@ -394,6 +501,22 @@ export async function tryDeterminePs1GameIdFromHex(filepath: string) {
     }
 
     try {
+      const systemCnfId = await tryReadPs1IdFromSystemCnf(fileHandle);
+      if (systemCnfId) {
+        const lookupId = normaliseGameIdForLookup(systemCnfId);
+        const gameName = await findPs1GameName(lookupId);
+        log.verbose(
+          `PS1 hex scan: SYSTEM.CNF resolved ${systemCnfId}` +
+            (gameName ? ` (${gameName})` : "")
+        );
+        return {
+          success: true,
+          gameId: systemCnfId,
+          formattedGameId: lookupId,
+          ...(gameName ? { gameName } : {}),
+        };
+      }
+
       log.verbose(`PS1 hex scan: reading ${path.basename(scanPath)} in ${FILE_SCAN_CHUNK_BYTES / 1024}KB chunks`);
       const buffer = Buffer.alloc(FILE_SCAN_CHUNK_BYTES);
       let position = 0;

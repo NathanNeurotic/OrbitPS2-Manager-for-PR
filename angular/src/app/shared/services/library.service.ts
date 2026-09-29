@@ -266,11 +266,12 @@ export class LibraryService {
     }
 
     const settings = await this._settings.load();
+    const configured = settings.emberDirectories?.[oplRoot];
     if (
-      settings.emberDirectory &&
-      (await window.libraryAPI.directoryExists(settings.emberDirectory).catch(() => false))
+      configured &&
+      (await window.libraryAPI.directoryExists(configured).catch(() => false))
     ) {
-      return settings.emberDirectory;
+      return configured;
     }
     return undefined;
   }
@@ -302,8 +303,19 @@ export class LibraryService {
       return;
     }
 
-    await this._settings.set('emberDirectory', chosen);
-    this._logger.log('libraryService', `Using custom Ember directory: ${chosen}`);
+    if (!this.currentDirectory) {
+      window.alert('Mount an OPL library before assigning its Ember folder.');
+      return;
+    }
+    const settings = await this._settings.load();
+    await this._settings.set('emberDirectories', {
+      ...(settings.emberDirectories ?? {}),
+      [this.currentDirectory]: chosen,
+    });
+    this._logger.log(
+      'libraryService',
+      `Using custom Ember directory for ${this.currentDirectory}: ${chosen}`
+    );
     this.refreshGamesFiles();
   }
 
