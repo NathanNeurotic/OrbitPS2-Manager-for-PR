@@ -216,9 +216,50 @@ describe('JobsService artwork job results', () => {
       confirmResult = false;
 
       const job = await run(PS1_JOB);
+      await new Promise((r) => setTimeout(r, 5));
 
       expect(job.status).toBe('cancelled');
       expect(refreshGamesFiles).toBe(1);
+    });
+
+    it('batches multiple normalized artwork jobs into one full rescan', async () => {
+      normalizeImpl = () =>
+        Promise.resolve({ success: true, changed: true, localName: 'SPYRO 2' });
+      downloadImpl = () => Promise.resolve({ success: true, data: COMPLETE });
+
+      const jobs = service.enqueue([
+        {
+          type: 'artwork',
+          label: 'Disc A',
+          filePath: '/opl/POPS/A.VCD',
+          gameId: 'SLUS-00001',
+          gameName: 'A',
+          downloadArtwork: false,
+          system: 'PS1',
+          normalizeKind: 'VCD',
+          canonicalName: 'A',
+          artTypes: ['COV'],
+        } as NewImportJob,
+        {
+          type: 'artwork',
+          label: 'Disc B',
+          filePath: '/opl/POPS/B.VCD',
+          gameId: 'SLUS-00002',
+          gameName: 'B',
+          downloadArtwork: false,
+          system: 'PS1',
+          normalizeKind: 'VCD',
+          canonicalName: 'B',
+          artTypes: ['COV'],
+        } as NewImportJob,
+      ]);
+
+      await Promise.all(jobs.map((job) => settled(job.id)));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(refreshGamesFiles).toBe(1);
+      expect(updateArtForGame).toEqual([]);
+      expect(updateArtForGames).toEqual([]);
     });
 
     it('does not re-scan on cancel when nothing was renamed', async () => {
