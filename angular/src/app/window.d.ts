@@ -37,6 +37,7 @@ declare interface Window {
         cuePath: string;
         gameId?: string;
         gameName?: string;
+        identificationStatus?: 'identified' | 'ambiguous' | 'unidentified';
         sizeBytes: number;
         message?: string;
       }>;
@@ -193,13 +194,27 @@ declare interface Window {
       gameId?: string;
       gameName?: string;
       message?: string;
+      identificationStatus?: 'identified' | 'ambiguous' | 'unidentified';
+      identificationMethod?: 'boot' | 'pvd' | 'md5';
+      internalGameId?: string;
+      discId?: string;
     }>;
 
     /** Open native file picker for game files (CD/DVD). isGamePsx also allows picking a .zip containing the .cue/.bin. */
     openAskGameFiles: (isGameCd: boolean, isGameDvd: boolean, isGamePsx?: boolean) => Promise<any>;
 
-    /** Try to determine PS1 game ID from a binary file via hex patterns. */
-    tryDeterminePs1GameIdFromHex: (filepath: string) => Promise<any>;
+    /** Identify a PS1 disc from structured disc metadata and verified conflict rules. */
+    tryDeterminePs1GameIdFromHex: (filepath: string) => Promise<{
+      success: boolean;
+      gameId?: string;
+      formattedGameId?: string;
+      gameName?: string;
+      message?: string;
+      identificationStatus?: 'identified' | 'ambiguous' | 'unidentified';
+      identificationMethod?: 'boot' | 'pvd' | 'md5';
+      internalGameId?: string;
+      discId?: string;
+    }>;
 
     /** Try to determine PS1 game ID from a VCD file. */
     tryDeterminePs1GameIdFromVcd: (filepath: string) => Promise<{
