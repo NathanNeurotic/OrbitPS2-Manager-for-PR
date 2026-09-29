@@ -45,7 +45,14 @@ export function ps1ArtworkIdentities(game: Game): string[] {
 }
 
 export function ps1CanonicalStorageName(game: Game): string | undefined {
-  if (game.isPs1Launcher || !game.canonicalTitle) return undefined;
+  if (
+    game.isPs1Launcher ||
+    !game.canonicalTitle ||
+    (game.identificationStatus !== undefined &&
+      game.identificationStatus !== 'identified')
+  ) {
+    return undefined;
+  }
   const kind = game.format === 'EMBER' ? 'EMBER' : 'VCD';
   return sanitizeRiptOplPs1StorageName(game.canonicalTitle, kind);
 }
