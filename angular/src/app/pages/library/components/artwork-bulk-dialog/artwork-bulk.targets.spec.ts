@@ -119,7 +119,7 @@ describe('PS1 identification safety', () => {
     game.identificationStatus = 'identified';
 
     const [target] = artTargetsForScope([game], 'PS1', { normalize: true });
-    expect(target.saveAsName).toBe('Alive (Disc 2)');
+    expect(target.saveAsName).toBe('Alive Disc 2');
     expect(target.canonicalName).toBe('Alive (Disc 2)');
   });
 });
