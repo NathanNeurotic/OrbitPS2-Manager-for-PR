@@ -18,6 +18,28 @@ export interface ArtTarget {
   saveAsName?: string;
   normalizeKind?: 'VCD' | 'EMBER';
   canonicalName?: string;
+  /**
+   * Current PS1 storage name (VCD stem / Ember folder) when it differs from
+   * the canonical title, i.e. the name normalization would rename away from.
+   */
+  renameFrom?: string;
+}
+
+/**
+ * Name RiptOPL keys a PS1 game's artwork by: the Ember game-folder name, or
+ * the VCD filename without its extension. Undefined for non-PS1 entries.
+ */
+export function ps1StorageIdentity(game: Game): string | undefined {
+  if (game.format === 'EMBER') return game.emberFolder;
+  if (game.system === 'PS1' && game.filename) {
+    return game.filename.replace(/\.[^./\\]+$/, '');
+  }
+  return undefined;
+}
+
+function needsPs1Normalization(game: Game): boolean {
+  const identity = ps1StorageIdentity(game);
+  return !!game.canonicalTitle && !!identity && game.canonicalTitle !== identity;
 }
 
 /**
@@ -50,38 +72,34 @@ export function eligibleGamesForScope(games: Game[], scope: ArtScope): Game[] {
  * games that already have every requested asset type are dropped entirely —
  * they are neither queued nor logged, matching what the dialog's pre-flight
  * summary promises.
+ *
+ * With `opts.normalize` (the user agreed to rename PS1 storage to canonical
+ * titles) PS1 targets carry `normalizeKind`/`canonicalName` so the job renames
+ * the VCD/Ember folder before saving art, and a game whose name is not yet
+ * canonical is queued even if its art is complete. Without it, PS1 art is
+ * saved under the current storage name — the name RiptOPL actually reads —
+ * and nothing on disk is renamed.
  */
 export function artTargetsForScope(
   games: Game[],
   scope: ArtScope,
-  opts?: { onlyMissing?: boolean; artTypes?: ArtType[] },
+  opts?: { onlyMissing?: boolean; artTypes?: ArtType[]; normalize?: boolean },
 ): ArtTarget[] {
   const types = opts?.artTypes?.length ? opts.artTypes : DEFAULT_ART_TYPES;
+  const normalize = !!opts?.normalize;
   return eligibleGamesForScope(games, scope)
     .filter((g) => {
       if (!opts?.onlyMissing) return true;
-      const identity =
-        g.format === 'EMBER'
-          ? g.emberFolder
-          : g.system === 'PS1' && g.filename
-            ? g.filename.replace(/\.[^./\\]+$/, '')
-            : undefined;
-      const needsNormalization =
-        !!g.canonicalTitle && !!identity && g.canonicalTitle !== identity;
       return (
-        needsNormalization ||
+        (normalize && needsPs1Normalization(g)) ||
         existingArtTypesForGame(g, types).length < types.length
       );
     })
     .map((g) => {
       const isPs1Launcher = g.system === 'APPS' && !!g.isPs1Launcher;
-      const isEmber = g.format === 'EMBER';
-      const currentPs1Identity = isEmber
-        ? g.emberFolder
-        : g.system === 'PS1' && g.filename
-          ? g.filename.replace(/\.[^./\\]+$/, '')
-          : undefined;
-      const canonicalPs1Identity = g.canonicalTitle || currentPs1Identity;
+      const currentPs1Identity = ps1StorageIdentity(g);
+      const normalizeThis =
+        normalize && g.system === 'PS1' && !!g.canonicalTitle;
       return {
         label: g.title || g.gameId || g.filename,
         path: g.path,
@@ -90,15 +108,15 @@ export function artTargetsForScope(
         saveAsName: isPs1Launcher
           ? g.ps1LauncherBoot
           : g.system === 'PS1'
-            ? canonicalPs1Identity
+            ? currentPs1Identity
             : undefined,
-        normalizeKind:
-          g.system === 'PS1' && g.canonicalTitle
-            ? isEmber
-              ? ('EMBER' as const)
-              : ('VCD' as const)
-            : undefined,
-        canonicalName: g.system === 'PS1' ? g.canonicalTitle : undefined,
+        normalizeKind: normalizeThis
+          ? g.format === 'EMBER'
+            ? ('EMBER' as const)
+            : ('VCD' as const)
+          : undefined,
+        canonicalName: normalizeThis ? g.canonicalTitle : undefined,
+        renameFrom: needsPs1Normalization(g) ? currentPs1Identity : undefined,
       };
     });
 }
@@ -112,7 +130,11 @@ export function artTargetsForScope(
  *   - PS1 POPStarter launchers  → matched by boot ELF filename (name-based)
  *   - PS1 POPSLoader/RiptOPL VCDs → matched by gameId **or** VCD title stem
  *     (their art may be saved under either convention)
+ *   - Ember games               → matched by gameId or game-folder name
  *   - Everything else          → matched by gameId
+ *
+ * Art saved under a canonical title the storage has not been renamed to is
+ * deliberately not counted: RiptOPL cannot see it, so it is not "present".
  */
 export function existingArtTypesForGame(
   game: Game,
@@ -120,14 +142,8 @@ export function existingArtTypesForGame(
 ): ArtType[] {
   const art = Array.isArray(game.art) ? game.art : [];
   const launcherBoot = game.isPs1Launcher ? game.ps1LauncherBoot : undefined;
-  const ps1Identity =
-    game.format === 'EMBER'
-      ? game.emberFolder
-      : game.system === 'PS1' && game.filename
-        ? game.filename.replace(/\.[^./\\]+$/, '')
-        : undefined;
   const acceptedNames = new Set(
-    [game.gameId, ps1Identity, game.canonicalTitle].filter(
+    [game.gameId, ps1StorageIdentity(game)].filter(
       (value): value is string => !!value,
     ),
   );

@@ -14,6 +14,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LucideAngularModule } from 'lucide-angular';
 import { LibraryService } from '@shared/services/library.service';
+import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
 import { KNOWN_ART_TYPES, artTypeLabel } from '@shared/constants/artwork-presets';
 import {
   ImportJob,
@@ -237,6 +238,7 @@ export class ArtworkBulkDialogComponent implements OnInit {
 
   private readonly _cdr = inject(ChangeDetectorRef);
   private readonly _destroyRef = inject(DestroyRef);
+  private readonly _confirm = inject(ConfirmDialogService);
   private readonly logAreaRef = viewChild<ElementRef<HTMLElement>>('logArea');
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -318,20 +320,78 @@ export class ArtworkBulkDialogComponent implements OnInit {
     if (
       this.eligibleCount() === 0 ||
       this.artTypes().length === 0 ||
-      this.running
+      this.running ||
+      this.confirmingRenames
     )
       return;
+
+    // PS1 games whose VCD/Ember folder name differs from the canonical title
+    // would be renamed on disk (with their VMC and existing art). That is a
+    // destructive, library-wide change, so it is never done silently.
+    const renames = artTargetsForScope(
+      this.games(),
+      this.scope(),
+      this.targetOptions(true),
+    ).filter((t) => !!t.renameFrom && !!t.canonicalName);
+
+    if (renames.length === 0) {
+      this.enqueueTargets(false);
+      return;
+    }
+
+    this.confirmingRenames = true;
+    void this._confirm
+      .confirm({
+        title: 'Rename PS1 games to canonical titles?',
+        message:
+          `${renames.length} PS1 game${renames.length === 1 ? '' : 's'} ` +
+          `${renames.length === 1 ? 'is' : 'are'} not named after the disc's canonical title. ` +
+          'RiptOPL keys artwork by that name. Rename them (along with their VMC ' +
+          'folders and existing artwork) before downloading, or keep the current ' +
+          'names and save artwork under those instead?',
+        detail: this.describeRenames(renames),
+        confirmLabel: 'Rename and download',
+        cancelLabel: 'Keep current names',
+        backdropClose: false,
+      })
+      .then((normalize) => {
+        this.confirmingRenames = false;
+        this.enqueueTargets(normalize);
+      });
+  }
+
+  private confirmingRenames = false;
+
+  private targetOptions(normalize: boolean) {
     // In "missing only" mode only games that actually lack at least one
     // selected asset type are queued — complete games are skipped entirely
     // (no job, no log line), matching the pre-flight summary.
+    return this.overwrite()
+      ? { normalize }
+      : { onlyMissing: true, artTypes: this.artTypes(), normalize };
+  }
+
+  private describeRenames(renames: { renameFrom?: string; canonicalName?: string }[]): string {
+    const limit = 20;
+    const lines = renames
+      .slice(0, limit)
+      .map((t) => `${t.renameFrom} → ${t.canonicalName}`);
+    if (renames.length > limit) {
+      lines.push(`…and ${renames.length - limit} more`);
+    }
+    return lines.join('\n');
+  }
+
+  private enqueueTargets(normalize: boolean) {
     const targets = artTargetsForScope(
       this.games(),
       this.scope(),
-      this.overwrite()
-        ? undefined
-        : { onlyMissing: true, artTypes: this.artTypes() },
+      this.targetOptions(normalize),
     );
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      this._cdr.detectChanges();
+      return;
+    }
 
     const created = this._jobs.enqueue(
       targets.map((t) => ({
@@ -343,6 +403,8 @@ export class ArtworkBulkDialogComponent implements OnInit {
         downloadArtwork: false,
         system: t.system,
         saveAsName: t.saveAsName,
+        normalizeKind: t.normalizeKind,
+        canonicalName: t.canonicalName,
         overwrite: this.overwrite(),
         artTypes: [...this.artTypes()],
         wideSlotFallback: true,
