@@ -38,6 +38,27 @@ export function isKnownPs1Conflict(gameId: string): boolean {
   return knownConflicts.has(normalizeDiscId(gameId));
 }
 
+
+export function resolveKnownPs1ConflictDigest(
+  internalGameId: string,
+  md5: string,
+): Ps1ConflictMatch | null {
+  const internalId = normalizeDiscId(internalGameId);
+  const digest = md5.trim().toLowerCase();
+  const match = wholeFileRules.find(
+    (rule) =>
+      normalizeDiscId(rule.internalId) === internalId &&
+      rule.md5.toLowerCase() === digest,
+  );
+  if (!match) return null;
+  return {
+    internalId,
+    discId: normalizeDiscId(match.discId),
+    title: match.title,
+    method: "md5",
+  };
+}
+
 async function md5Segments(
   filePath: string,
   segments: Array<{ start: number; length: number }>,
@@ -227,16 +248,9 @@ export async function matchPs1Conflict(
 
   if (fullRules.length > 0) {
     const digests = await wholeInputMd5Candidates(filePath, stat.size);
-    const match = fullRules.find((rule) =>
-      digests.includes(rule.md5.toLowerCase()),
-    );
-    if (match) {
-      return {
-        internalId,
-        discId: normalizeDiscId(match.discId),
-        title: match.title,
-        method: "md5",
-      };
+    for (const digest of digests) {
+      const match = resolveKnownPs1ConflictDigest(internalId, digest);
+      if (match) return match;
     }
   }
 
