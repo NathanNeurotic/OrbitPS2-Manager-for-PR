@@ -13,6 +13,7 @@ const PS1_GAMES_LIST_CANDIDATE_PATHS = [
 ];
 
 let cachedPs1GamesList: Map<string, string> | null = null;
+let cachedPs1AmbiguousIds = new Set<string>();
 let attemptedToLoadPs1GamesList = false;
 
 async function loadPs1GamesList() {
@@ -26,6 +27,7 @@ async function loadPs1GamesList() {
     try {
       const content = await fs.readFile(candidate, "utf-8");
       const map = new Map<string, string>();
+      const ambiguous = new Set<string>();
 
       content.split(/\r?\n/).forEach((line) => {
         const trimmed = line.trim();
@@ -38,12 +40,22 @@ async function loadPs1GamesList() {
           return;
         }
 
-        map.set(id.toUpperCase(), nameParts.join(" "));
+        const key = id.toUpperCase();
+        const name = nameParts.join(" ");
+        const existing = map.get(key);
+        if (existing && existing !== name) {
+          ambiguous.add(key);
+          return;
+        }
+        map.set(key, name);
       });
 
       if (map.size > 0) {
         cachedPs1GamesList = map;
-        log.verbose(`Loaded PS1 games list (${map.size} titles) from ${candidate}`);
+        cachedPs1AmbiguousIds = ambiguous;
+        log.verbose(
+          `Loaded PS1 games list (${map.size} serials, ${ambiguous.size} ambiguous) from ${candidate}`
+        );
         return cachedPs1GamesList;
       }
     } catch (err) {
@@ -62,7 +74,14 @@ export async function findPs1GameName(gameId: string) {
     return undefined;
   }
 
-  return list.get(gameId.toUpperCase());
+  const key = gameId.toUpperCase();
+  if (cachedPs1AmbiguousIds.has(key)) {
+    log.warn(
+      `PS1 serial ${key} maps to multiple titles; refusing canonical title selection`
+    );
+    return undefined;
+  }
+  return list.get(key);
 }
 
 const PS2_GAMES_LIST_CANDIDATE_PATHS = [
