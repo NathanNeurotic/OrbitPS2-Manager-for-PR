@@ -56,6 +56,10 @@ export class LibraryComponent {
     this.showArtworkBulkDialog = true;
   }
 
+  locateEmberFolder() {
+    void this._libraryService.locateEmberDirectory();
+  }
+
   /** Number of games in the active tab that can receive artwork. */
   get activeTab(): SystemTab {
     return this.activeTabSubject.getValue();

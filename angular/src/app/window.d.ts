@@ -27,6 +27,22 @@ declare interface Window {
     /** List artwork files in the ART folder. */
     getArtFolder: (dirPath: string) => Promise<any>;
 
+    /** Scan EMBER/games/<folder>/ and identify each game from its CUE/BIN data track. */
+    getEmberGames: (emberPath: string) => Promise<{
+      success: boolean;
+      gamesDir?: string;
+      games: Array<{
+        folderName: string;
+        path: string;
+        cuePath: string;
+        gameId?: string;
+        gameName?: string;
+        sizeBytes: number;
+        message?: string;
+      }>;
+      message?: string;
+    }>;
+
     /** Rename a game file and optionally update its CFG. */
     renameGamefile: (
       dirPath: string,
@@ -48,6 +64,21 @@ declare interface Window {
       newCfgContent?: string;
       newAppsFolder?: string;
       safeNewTitle?: string;
+      message?: string;
+    }>;
+
+    /** Normalize a RiptOPL VCD filename or Ember game-folder identity. */
+    normalizeRiptOplPs1Storage: (params: {
+      kind: 'VCD' | 'EMBER';
+      sourcePath: string;
+      gameId: string;
+      canonicalTitle: string;
+      artDir: string;
+    }) => Promise<{
+      success: boolean;
+      changed?: boolean;
+      newPath?: string;
+      localName?: string;
       message?: string;
     }>;
 
@@ -516,6 +547,8 @@ declare interface AppSettings {
   autoReconnect: boolean;
   /** Last-picked PS1 launcher style on the Import screen. */
   ps1LauncherMode?: 'popstarter' | 'popsloader';
+  /** Optional Ember root/games folder used when <mounted device>/EMBER is absent. */
+  emberDirectory?: string;
   /** UI color theme. "system" follows the OS light/dark preference (OrbitPS2 only). */
   theme: 'orbitps2' | 'orbitps2-light' | 'legacy' | 'system';
 }

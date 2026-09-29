@@ -16,6 +16,8 @@ export interface ArtTarget {
   gameId: string;
   system: 'PS1' | 'PS2';
   saveAsName?: string;
+  normalizeKind?: 'VCD' | 'EMBER';
+  canonicalName?: string;
 }
 
 /**
@@ -58,22 +60,45 @@ export function artTargetsForScope(
   return eligibleGamesForScope(games, scope)
     .filter((g) => {
       if (!opts?.onlyMissing) return true;
-      return existingArtTypesForGame(g, types).length < types.length;
+      const identity =
+        g.format === 'EMBER'
+          ? g.emberFolder
+          : g.system === 'PS1' && g.filename
+            ? g.filename.replace(/\.[^./\\]+$/, '')
+            : undefined;
+      const needsNormalization =
+        !!g.canonicalTitle && !!identity && g.canonicalTitle !== identity;
+      return (
+        needsNormalization ||
+        existingArtTypesForGame(g, types).length < types.length
+      );
     })
     .map((g) => {
       const isPs1Launcher = g.system === 'APPS' && !!g.isPs1Launcher;
+      const isEmber = g.format === 'EMBER';
+      const currentPs1Identity = isEmber
+        ? g.emberFolder
+        : g.system === 'PS1' && g.filename
+          ? g.filename.replace(/\.[^./\\]+$/, '')
+          : undefined;
+      const canonicalPs1Identity = g.canonicalTitle || currentPs1Identity;
       return {
         label: g.title || g.gameId || g.filename,
         path: g.path,
         gameId: g.gameId,
         system: isPs1Launcher || g.system === 'PS1' ? 'PS1' : 'PS2',
-        // PS1 launcher art is keyed by boot ELF name (e.g. "XX.SCUS_944.02.Game.ELF"),
-        // so the saved files must use that stem to match the library matcher.
-        // PS1 POPSLoader/RiptOPL VCDs intentionally save under the gameId: the
-        // repo is keyed by game folder and `existingArtTypesForGame` already
-        // detects both the gameId and title-stem conventions, so re-downloading
-        // won't duplicate art that the importer saved under the VCD title.
-        saveAsName: isPs1Launcher ? g.ps1LauncherBoot : undefined,
+        saveAsName: isPs1Launcher
+          ? g.ps1LauncherBoot
+          : g.system === 'PS1'
+            ? canonicalPs1Identity
+            : undefined,
+        normalizeKind:
+          g.system === 'PS1' && g.canonicalTitle
+            ? isEmber
+              ? ('EMBER' as const)
+              : ('VCD' as const)
+            : undefined,
+        canonicalName: g.system === 'PS1' ? g.canonicalTitle : undefined,
       };
     });
 }
@@ -95,19 +120,24 @@ export function existingArtTypesForGame(
 ): ArtType[] {
   const art = Array.isArray(game.art) ? game.art : [];
   const launcherBoot = game.isPs1Launcher ? game.ps1LauncherBoot : undefined;
-  const ps1VcdStem =
-    game.system === 'PS1' && game.filename
-      ? game.filename.replace(/\.[^./\\]+$/, '')
-      : undefined;
+  const ps1Identity =
+    game.format === 'EMBER'
+      ? game.emberFolder
+      : game.system === 'PS1' && game.filename
+        ? game.filename.replace(/\.[^./\\]+$/, '')
+        : undefined;
+  const acceptedNames = new Set(
+    [game.gameId, ps1Identity, game.canonicalTitle].filter(
+      (value): value is string => !!value,
+    ),
+  );
   return types.filter((type) =>
     art.some(
       (a) =>
         a.type?.toUpperCase() === type &&
         (launcherBoot
           ? a.name === `${launcherBoot}_${type}`
-          : ps1VcdStem
-            ? a.gameId === game.gameId || a.gameId === ps1VcdStem
-            : a.gameId === game.gameId),
+          : acceptedNames.has(a.gameId)),
     ),
   );
 }

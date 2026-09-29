@@ -181,9 +181,16 @@ export class ArtworkWizardDialogComponent {
   }
 
   private get localName(): string {
-    return this.isPs1Launcher
-      ? this.game().ps1LauncherBoot || this.game().gameId
-      : this.game().gameId;
+    const g = this.game();
+    if (this.isPs1Launcher) {
+      return g.ps1LauncherBoot || g.gameId;
+    }
+    if (g.system === 'PS1') {
+      if (g.canonicalTitle) return g.canonicalTitle;
+      if (g.format === 'EMBER') return g.emberFolder || g.gameId;
+      return g.filename?.replace(/\.[^./\\]+$/, '') || g.gameId;
+    }
+    return g.gameId;
   }
 
   /**
@@ -194,9 +201,11 @@ export class ArtworkWizardDialogComponent {
    */
   private get ps1VcdStem(): string | undefined {
     const g = this.game();
-    if (this.system !== 'PS1' || this.isPs1Launcher || !g.filename) {
+    if (this.system !== 'PS1' || this.isPs1Launcher) {
       return undefined;
     }
+    if (g.format === 'EMBER') return g.emberFolder;
+    if (!g.filename) return undefined;
     return g.filename.replace(/\.[^./\\]+$/, '');
   }
 
@@ -510,7 +519,19 @@ export class ArtworkWizardDialogComponent {
         gameName: g.title || '',
         downloadArtwork: false,
         system: this.system,
-        saveAsName: this.isPs1Launcher ? g.ps1LauncherBoot : undefined,
+        saveAsName: this.isPs1Launcher
+          ? g.ps1LauncherBoot
+          : g.system === 'PS1'
+            ? this.localName
+            : undefined,
+        normalizeKind:
+          g.system === 'PS1' && !this.isPs1Launcher && g.canonicalTitle
+            ? g.format === 'EMBER'
+              ? 'EMBER'
+              : 'VCD'
+            : undefined,
+        canonicalName:
+          g.system === 'PS1' && !this.isPs1Launcher ? g.canonicalTitle : undefined,
         artTypes: types,
         artSaveAsOverrides:
           Object.keys(artSaveAsOverrides).length > 0
