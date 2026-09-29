@@ -104,3 +104,22 @@ describe('RiptOPL PS1 artwork compatibility fallbacks', () => {
     expect(existingArtTypesForGame(game, ['COV2'])).toEqual(['COV2']);
   });
 });
+
+
+describe('PS1 identification safety', () => {
+  it('excludes ambiguous PS1 discs from automatic artwork targets', () => {
+    const game = ps1Vcd('Alive Disc 2.VCD', 'Alive (Disc 2)');
+    game.identificationStatus = 'ambiguous';
+
+    expect(artTargetsForScope([game], 'PS1', { normalize: true })).toEqual([]);
+  });
+
+  it('keeps identified PS1 discs eligible for canonical artwork naming', () => {
+    const game = ps1Vcd('Alive Disc 2.VCD', 'Alive (Disc 2)');
+    game.identificationStatus = 'identified';
+
+    const [target] = artTargetsForScope([game], 'PS1', { normalize: true });
+    expect(target.saveAsName).toBe('Alive (Disc 2)');
+    expect(target.canonicalName).toBe('Alive (Disc 2)');
+  });
+});
