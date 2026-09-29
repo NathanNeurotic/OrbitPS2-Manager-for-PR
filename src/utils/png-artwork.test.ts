@@ -101,3 +101,10 @@ test("non-indexed source is rejected instead of writing incompatible art", () =>
     /8-bit indexed PNG/,
   );
 });
+
+
+test("RiptOPL COV3 keeps the database secondary-cover dimensions", () => {
+  const input = indexedPng(222, 200);
+  const output = normalizeArtworkPng(input, "PS1", "COV3");
+  assert.equal(output, input);
+});
