@@ -21,7 +21,7 @@ jobs:
           cache: npm
 
       - name: Install backend dependencies
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Build backend
         run: npm run build
