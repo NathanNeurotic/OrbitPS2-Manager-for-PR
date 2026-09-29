@@ -87,8 +87,26 @@ async function renameMatchingCoverArt(
       parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
     const newName = `${newBaseName}_${targetType}${ext}`;
     if (newName === name) continue;
+
+    const sourcePath = path.join(artDir, name);
+    const targetPath = path.join(artDir, newName);
+    const caseOnly =
+      sourcePath !== targetPath &&
+      sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase();
+    if (!caseOnly) {
+      try {
+        await fs.access(targetPath);
+        log.warn(
+          `Artwork target already exists, keeping both files: ${newName} (source ${name} left in place)`
+        );
+        continue;
+      } catch {
+        // Target is free.
+      }
+    }
+
     try {
-      await fs.rename(path.join(artDir, name), path.join(artDir, newName));
+      await renameCaseAware(sourcePath, targetPath, "cover-art");
       log.verbose(`Renamed artwork: ${name} → ${newName}`);
       renamed++;
     } catch (err: unknown) {
@@ -163,7 +181,8 @@ interface ArtworkRenameOperation {
 
 async function planMatchingCoverArtRenames(
   artDir: string,
-  matches: (nameBeforeType: string) => boolean,
+  primaryMatches: (nameBeforeType: string) => boolean,
+  fallbackMatches: (nameBeforeType: string) => boolean,
   newBaseName: string,
 ): Promise<{ operations: ArtworkRenameOperation[]; message?: string }> {
   let entries: string[];
@@ -188,16 +207,38 @@ async function planMatchingCoverArtRenames(
   const imageEntries = entries.filter((name) =>
     /^\.(png|jpe?g)$/i.test(path.extname(name))
   );
-  const plannedLogicalTargets = new Map<string, string>();
+  const classify = (name: string): "primary" | "fallback" | null => {
+    const ext = path.extname(name);
+    const parsed = parseArtworkBaseName(name.slice(0, -ext.length));
+    if (!parsed) return null;
+    if (primaryMatches(parsed.identity)) return "primary";
+    if (fallbackMatches(parsed.identity)) return "fallback";
+    return null;
+  };
+
+  const plannedLogicalTargets = new Map<
+    string,
+    { sourceName: string; kind: "primary" | "fallback" }
+  >();
   const operations: ArtworkRenameOperation[] = [];
 
-  for (const name of imageEntries) {
+  // Plan primary storage-identity artwork first. GameID-keyed files are
+  // fallbacks and must never block or overwrite an already-populated slot.
+  const ordered = [
+    ...imageEntries.filter((name) => classify(name) === "primary"),
+    ...imageEntries.filter((name) => classify(name) === "fallback"),
+  ];
+
+  for (const name of ordered) {
     if (name.startsWith(".")) continue;
+
+    const kind = classify(name);
+    if (!kind) continue;
 
     const ext = path.extname(name);
     const baseName = name.slice(0, -ext.length);
     const parsed = parseArtworkBaseName(baseName);
-    if (!parsed || !matches(parsed.identity)) continue;
+    if (!parsed) continue;
 
     const targetType =
       parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
@@ -207,26 +248,45 @@ async function planMatchingCoverArtRenames(
     const sourceLower = name.toLocaleLowerCase();
     const targetLogicalKey = path.parse(targetName).name.toLocaleLowerCase();
 
-    const duplicatePlannedSource = plannedLogicalTargets.get(targetLogicalKey);
-    if (duplicatePlannedSource && duplicatePlannedSource !== name) {
-      return {
-        operations: [],
-        message:
-          'Cannot normalize artwork because both "' +
-          duplicatePlannedSource +
-          '" and "' +
-          name +
-          '" would become the same "' +
-          path.parse(targetName).name +
-          '" artwork slot.',
-      };
+    const duplicatePlanned = plannedLogicalTargets.get(targetLogicalKey);
+    if (duplicatePlanned) {
+      if (kind === "fallback" || duplicatePlanned.kind === "primary") {
+        if (kind === "fallback") {
+          log.verbose(
+            `Skipping fallback artwork ${name}; ${duplicatePlanned.sourceName} already fills ${targetName}`
+          );
+          continue;
+        }
+        return {
+          operations: [],
+          message:
+            'Cannot normalize artwork because both "' +
+            duplicatePlanned.sourceName +
+            '" and "' +
+            name +
+            '" would become the same "' +
+            path.parse(targetName).name +
+            '" artwork slot.',
+        };
+      }
     }
 
     const existingCollision = imageEntries.find((existing) => {
       if (existing.toLocaleLowerCase() === sourceLower) return false;
-      return path.parse(existing).name.toLocaleLowerCase() === targetLogicalKey;
+      if (path.parse(existing).name.toLocaleLowerCase() !== targetLogicalKey) {
+        return false;
+      }
+      // A leftover GameID-keyed file is a fallback, not a blocker for the
+      // storage-identity file that owns the slot.
+      return classify(existing) !== "fallback";
     });
     if (existingCollision) {
+      if (kind === "fallback") {
+        log.verbose(
+          `Skipping fallback artwork ${name}; ${existingCollision} already occupies ${targetName}`
+        );
+        continue;
+      }
       return {
         operations: [],
         message:
@@ -238,7 +298,7 @@ async function planMatchingCoverArtRenames(
       };
     }
 
-    plannedLogicalTargets.set(targetLogicalKey, name);
+    plannedLogicalTargets.set(targetLogicalKey, { sourceName: name, kind });
     operations.push({
       sourcePath: path.join(artDir, name),
       targetPath: path.join(artDir, targetName),
@@ -670,13 +730,9 @@ export async function normalizeRiptOplPs1Storage(params: {
   // duplicate old-name/GameID art that would collapse onto the same slot.
   const artworkPlan = await planMatchingCoverArtRenames(
     params.artDir,
-    (nameBeforeType) => {
-      const upper = nameBeforeType.toUpperCase();
-      return (
-        upper === currentUpper ||
-        (!!gameIdUpper && upper === gameIdUpper)
-      );
-    },
+    (nameBeforeType) => nameBeforeType.toUpperCase() === currentUpper,
+    (nameBeforeType) =>
+      !!gameIdUpper && nameBeforeType.toUpperCase() === gameIdUpper,
     safeTitle,
   );
   if (artworkPlan.message) {
