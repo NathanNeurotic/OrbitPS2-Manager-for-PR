@@ -22,8 +22,10 @@ import {
   JobsService,
 } from '@shared/services/jobs.service';
 import { Game } from '@shared/types/game.type';
+import { ps1CanonicalRenameConfirm } from '@shared/utils/ps1-canonical-rename';
 import {
   ArtScope,
+  ArtTarget,
   ArtType,
   DEFAULT_ART_TYPES,
   artTargetsForScope,
@@ -325,74 +327,44 @@ export class ArtworkBulkDialogComponent implements OnInit {
     )
       return;
 
-    // PS1 games whose VCD/Ember folder name differs from the canonical title
-    // would be renamed on disk (with their VMC and existing art). That is a
-    // destructive, library-wide change, so it is never done silently.
-    const renames = artTargetsForScope(
-      this.games(),
-      this.scope(),
-      this.targetOptions(true),
-    ).filter((t) => !!t.renameFrom && !!t.canonicalName);
+    // RiptOPL keys PS1 artwork by the VCD/Ember folder name, so PS1 storage is
+    // always normalized to the canonical title. Renaming files on disk is
+    // never done silently: warn with the full list and let "No" cancel the run.
+    const targets = artTargetsForScope(this.games(), this.scope(), this.targetOptions());
+    if (targets.length === 0) return;
 
+    const renames = targets.flatMap((t) =>
+      t.renameFrom && t.canonicalName
+        ? [{ from: t.renameFrom, to: t.canonicalName }]
+        : [],
+    );
     if (renames.length === 0) {
-      this.enqueueTargets(false);
+      this.enqueueTargets(targets);
       return;
     }
 
     this.confirmingRenames = true;
     void this._confirm
-      .confirm({
-        title: 'Rename PS1 games to canonical titles?',
-        message:
-          `${renames.length} PS1 game${renames.length === 1 ? '' : 's'} ` +
-          `${renames.length === 1 ? 'is' : 'are'} not named after the disc's canonical title. ` +
-          'RiptOPL keys artwork by that name. Rename them (along with their VMC ' +
-          'folders and existing artwork) before downloading, or keep the current ' +
-          'names and save artwork under those instead?',
-        detail: this.describeRenames(renames),
-        confirmLabel: 'Rename and download',
-        cancelLabel: 'Keep current names',
-        backdropClose: false,
-      })
-      .then((normalize) => {
+      .confirm(ps1CanonicalRenameConfirm(renames))
+      .then((proceed) => {
         this.confirmingRenames = false;
-        this.enqueueTargets(normalize);
+        if (proceed) this.enqueueTargets(targets);
       });
   }
 
   private confirmingRenames = false;
 
-  private targetOptions(normalize: boolean) {
+  private targetOptions() {
     // In "missing only" mode only games that actually lack at least one
     // selected asset type are queued — complete games are skipped entirely
-    // (no job, no log line), matching the pre-flight summary.
+    // (no job, no log line), matching the pre-flight summary. Games whose
+    // storage name is not yet canonical are always queued so they get renamed.
     return this.overwrite()
-      ? { normalize }
-      : { onlyMissing: true, artTypes: this.artTypes(), normalize };
+      ? { normalize: true }
+      : { onlyMissing: true, artTypes: this.artTypes(), normalize: true };
   }
 
-  private describeRenames(renames: { renameFrom?: string; canonicalName?: string }[]): string {
-    const limit = 20;
-    const lines = renames
-      .slice(0, limit)
-      .map((t) => `${t.renameFrom} → ${t.canonicalName}`);
-    if (renames.length > limit) {
-      lines.push(`…and ${renames.length - limit} more`);
-    }
-    return lines.join('\n');
-  }
-
-  private enqueueTargets(normalize: boolean) {
-    const targets = artTargetsForScope(
-      this.games(),
-      this.scope(),
-      this.targetOptions(normalize),
-    );
-    if (targets.length === 0) {
-      this._cdr.detectChanges();
-      return;
-    }
-
+  private enqueueTargets(targets: ArtTarget[]) {
     const created = this._jobs.enqueue(
       targets.map((t) => ({
         type: 'artwork' as const,

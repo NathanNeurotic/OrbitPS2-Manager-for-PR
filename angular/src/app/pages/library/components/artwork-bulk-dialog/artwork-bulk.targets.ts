@@ -1,5 +1,9 @@
 import { Game } from '@shared/types/game.type';
 import { KNOWN_ART_TYPES } from '@shared/constants/artwork-presets';
+import {
+  ps1CanonicalRename,
+  ps1StorageIdentity,
+} from '@shared/utils/ps1-canonical-rename';
 
 /** Which section of the library an artwork bulk run should target. */
 export type ArtScope = 'PS2' | 'PS1' | 'APPS' | 'ALL';
@@ -25,21 +29,8 @@ export interface ArtTarget {
   renameFrom?: string;
 }
 
-/**
- * Name RiptOPL keys a PS1 game's artwork by: the Ember game-folder name, or
- * the VCD filename without its extension. Undefined for non-PS1 entries.
- */
-export function ps1StorageIdentity(game: Game): string | undefined {
-  if (game.format === 'EMBER') return game.emberFolder;
-  if (game.system === 'PS1' && game.filename) {
-    return game.filename.replace(/\.[^./\\]+$/, '');
-  }
-  return undefined;
-}
-
 function needsPs1Normalization(game: Game): boolean {
-  const identity = ps1StorageIdentity(game);
-  return !!game.canonicalTitle && !!identity && game.canonicalTitle !== identity;
+  return !!ps1CanonicalRename(game);
 }
 
 /**

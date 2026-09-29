@@ -1,8 +1,13 @@
 import { Component, computed, input, output, signal } from '@angular/core';
 import { LucideAngularModule } from 'lucide-angular';
 import { Game } from '@shared/types/game.type';
-import { JobsService } from '@shared/services/jobs.service';
+import { JobsService, NewImportJob } from '@shared/services/jobs.service';
 import { LibraryService } from '@shared/services/library.service';
+import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
+import {
+  ps1CanonicalRename,
+  ps1CanonicalRenameConfirm,
+} from '@shared/utils/ps1-canonical-rename';
 import {
   ART_CATEGORIES,
   artCategoryForType,
@@ -170,6 +175,7 @@ export class ArtworkWizardDialogComponent {
   constructor(
     private readonly _jobs: JobsService,
     private readonly _library: LibraryService,
+    private readonly _confirm: ConfirmDialogService,
   ) { }
 
   private get isPs1Launcher(): boolean {
@@ -510,50 +516,63 @@ export class ArtworkWizardDialogComponent {
       if (saveBase !== t.toUpperCase()) artSaveAsOverrides[t] = saveBase;
     }
 
-    this._jobs.enqueue([
-      {
-        type: 'artwork',
-        label: g.title || g.gameId || g.filename,
-        filePath: g.path,
-        gameId: g.gameId,
-        gameName: g.title || '',
-        downloadArtwork: false,
-        system: this.system,
-        saveAsName: this.isPs1Launcher
-          ? g.ps1LauncherBoot
-          : g.system === 'PS1'
-            ? this.localName
-            : undefined,
-        normalizeKind:
-          g.system === 'PS1' && !this.isPs1Launcher && g.canonicalTitle
-            ? g.format === 'EMBER'
-              ? 'EMBER'
-              : 'VCD'
-            : undefined,
-        canonicalName:
-          g.system === 'PS1' && !this.isPs1Launcher ? g.canonicalTitle : undefined,
-        artTypes: types,
-        artSaveAsOverrides:
-          Object.keys(artSaveAsOverrides).length > 0
-            ? artSaveAsOverrides
-            : undefined,
-        // `true` — the reviewed selection knowingly replaces files on disk;
-        // `false` — "skip existing" is on, so fetch only what is missing;
-        // `undefined` — nothing selected exists yet, nothing to confirm.
-        //
-        // The three states must not be collapsed. Sending `true` whenever skip is
-        // off silently replaced artwork a user had already curated, and the
-        // footer was still labelled "Download Selected". Sending `undefined`
-        // under a skip policy would instead let the worker pop a confirmation
-        // for a run that is only ever meant to fill gaps.
-        overwrite: this.willOverwriteSelected()
-          ? true
-          : this.skipExisting()
-            ? false
-            : undefined,
-      },
-    ]);
-    this.close();
+    const job: NewImportJob = {
+      type: 'artwork',
+      label: g.title || g.gameId || g.filename,
+      filePath: g.path,
+      gameId: g.gameId,
+      gameName: g.title || '',
+      downloadArtwork: false,
+      system: this.system,
+      saveAsName: this.isPs1Launcher
+        ? g.ps1LauncherBoot
+        : g.system === 'PS1'
+          ? this.localName
+          : undefined,
+      normalizeKind:
+        g.system === 'PS1' && !this.isPs1Launcher && g.canonicalTitle
+          ? g.format === 'EMBER'
+            ? 'EMBER'
+            : 'VCD'
+          : undefined,
+      canonicalName:
+        g.system === 'PS1' && !this.isPs1Launcher ? g.canonicalTitle : undefined,
+      artTypes: types,
+      artSaveAsOverrides:
+        Object.keys(artSaveAsOverrides).length > 0
+          ? artSaveAsOverrides
+          : undefined,
+      // `true` — the reviewed selection knowingly replaces files on disk;
+      // `false` — "skip existing" is on, so fetch only what is missing;
+      // `undefined` — nothing selected exists yet, nothing to confirm.
+      //
+      // The three states must not be collapsed. Sending `true` whenever skip is
+      // off silently replaced artwork a user had already curated, and the
+      // footer was still labelled "Download Selected". Sending `undefined`
+      // under a skip policy would instead let the worker pop a confirmation
+      // for a run that is only ever meant to fill gaps.
+      overwrite: this.willOverwriteSelected()
+        ? true
+        : this.skipExisting()
+          ? false
+          : undefined,
+    };
+
+    // RiptOPL keys PS1 artwork by the VCD/Ember folder name, so the job renames
+    // storage to the canonical title first. Warn before touching the filename;
+    // "No" leaves the wizard open and nothing is queued.
+    const rename = job.normalizeKind ? ps1CanonicalRename(g) : undefined;
+    if (!rename) {
+      this._jobs.enqueue([job]);
+      this.close();
+      return;
+    }
+
+    void this._confirm.confirm(ps1CanonicalRenameConfirm([rename])).then((proceed) => {
+      if (!proceed) return;
+      this._jobs.enqueue([job]);
+      this.close();
+    });
   }
 
   close(): void {

@@ -533,31 +533,33 @@ describe('ArtworkBulkDialogComponent PS1 rename confirmation', () => {
 
   const settle = () => new Promise((resolve) => setTimeout(resolve));
 
-  it('asks before renaming and forwards the rename when accepted', async () => {
+  it('warns with a Yes/No prompt and forwards the rename on Yes', async () => {
     confirmResult = true;
     setup([ps1Game('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE")]);
 
     component.start();
+    expect(enqueued.length).toBe(0);
     await settle();
 
     expect(confirmCalls.length).toBe(1);
+    expect(confirmCalls[0].message).toContain('canonical name and artwork');
+    expect(confirmCalls[0].confirmLabel).toBe('Yes');
+    expect(confirmCalls[0].cancelLabel).toBe('No');
     expect(confirmCalls[0].detail).toContain("Spyro 2 → SPYRO 2 - RIPTO'S RAGE");
     expect(enqueued.length).toBe(1);
     expect(enqueued[0].normalizeKind).toBe('VCD');
     expect(enqueued[0].canonicalName).toBe("SPYRO 2 - RIPTO'S RAGE");
   });
 
-  it('keeps current names and saves art under them when declined', async () => {
+  it('cancels the whole run on No', async () => {
     confirmResult = false;
     setup([ps1Game('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE")]);
 
     component.start();
     await settle();
 
-    expect(enqueued.length).toBe(1);
-    expect(enqueued[0].normalizeKind).toBeUndefined();
-    expect(enqueued[0].canonicalName).toBeUndefined();
-    expect(enqueued[0].saveAsName).toBe('Spyro 2');
+    expect(enqueued.length).toBe(0);
+    expect(component.running).toBe(false);
   });
 
   it('does not prompt when every PS1 game already has its canonical name', () => {
@@ -568,5 +570,7 @@ describe('ArtworkBulkDialogComponent PS1 rename confirmation', () => {
 
     expect(confirmCalls.length).toBe(0);
     expect(enqueued.length).toBe(1);
+    // Still normalized, so any GameID-named art migrates to the canonical name.
+    expect(enqueued[0].normalizeKind).toBe('VCD');
   });
 });
