@@ -47,8 +47,8 @@ const EXPECTED_DIMENSIONS: Record<
 
 function crc32Buffer(buffer: Buffer): number {
   let crc = 0xffffffff;
-  for (const value of buffer) {
-    crc ^= value;
+  for (let i = 0; i < buffer.length; i++) {
+    crc ^= buffer[i];
     for (let bit = 0; bit < 8; bit++) {
       crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
     }
