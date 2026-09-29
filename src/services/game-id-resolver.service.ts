@@ -35,27 +35,65 @@ function readLe32(buffer: Buffer, offset: number): number {
   ) >>> 0;
 }
 
+const ISO_BLOCK_SIZE = 2048;
+
+/**
+ * Sector layouts a PS1 image can use. `dataOffset` is where the 2048 bytes of
+ * user data start inside each physical sector:
+ * - plain ISO: 2048-byte sectors, no framing;
+ * - MODE1/2352: 12-byte sync + 4-byte header;
+ * - MODE2/2352 (CD-XA Form 1 — every pressed PS1 disc and POPS VCD payload):
+ *   12-byte sync + 4-byte header + 8-byte subheader.
+ */
+const SECTOR_LAYOUTS = [
+  { sectorSize: 2048, dataOffset: 0 },
+  { sectorSize: 2352, dataOffset: 24 },
+  { sectorSize: 2352, dataOffset: 16 },
+];
+
+/**
+ * Read `length` bytes of logical (user) data starting at logical block `lba`,
+ * skipping per-sector framing so multi-sector reads stay contiguous.
+ */
+async function readUserData(
+  fileHandle: fs.FileHandle,
+  baseOffset: number,
+  layout: { sectorSize: number; dataOffset: number },
+  lba: number,
+  length: number
+): Promise<Buffer | null> {
+  const out = Buffer.alloc(length);
+  let written = 0;
+  let block = lba;
+
+  while (written < length) {
+    const chunk = Math.min(ISO_BLOCK_SIZE, length - written);
+    const position = baseOffset + block * layout.sectorSize + layout.dataOffset;
+    const { bytesRead } = await fileHandle.read(out, written, chunk, position);
+    if (bytesRead !== chunk) return null;
+    written += chunk;
+    block++;
+  }
+
+  return out;
+}
+
 /**
  * RetroGem-compatible primary PS1 identity path: locate the ISO9660 PVD,
  * traverse the root directory for SYSTEM.CNF, then read the BOOT target.
  *
- * Supports both 2048-byte ISO sectors and raw 2352-byte BIN sectors. The base
- * offset lets the same parser operate on POPS VCD payloads after the 1 MiB header.
+ * Supports 2048-byte ISO sectors and raw 2352-byte MODE1/MODE2 BIN sectors.
+ * The base offset lets the same parser operate on POPS VCD payloads after the
+ * 1 MiB header.
  */
 async function tryReadPs1IdFromSystemCnf(
   fileHandle: fs.FileHandle,
   baseOffset = 0
 ): Promise<string | null> {
-  const layouts = [
-    { pvdOffset: baseOffset + 16 * 2048, sectorSize: 2048, modeOffset: 0 },
-    { pvdOffset: baseOffset + 16 * 2352 + 16, sectorSize: 2352, modeOffset: 16 },
-  ];
-
-  for (const layout of layouts) {
-    const pvd = Buffer.alloc(2048);
-    const pvdRead = await fileHandle.read(pvd, 0, pvd.length, layout.pvdOffset);
+  for (const layout of SECTOR_LAYOUTS) {
+    const pvd = await readUserData(fileHandle, baseOffset, layout, 16, ISO_BLOCK_SIZE);
     if (
-      pvdRead.bytesRead !== pvd.length ||
+      !pvd ||
       pvd[0] !== 0x01 ||
       pvd.subarray(1, 6).toString("ascii") !== "CD001"
     ) {
@@ -66,17 +104,16 @@ async function tryReadPs1IdFromSystemCnf(
     const rootLen = readLe32(pvd, 166);
     if (rootLen <= 0 || rootLen > 32768) continue;
 
-    const rootOffset =
-      baseOffset + rootLba * layout.sectorSize + layout.modeOffset;
-    const dirBuf = Buffer.alloc(rootLen);
-    const dirRead = await fileHandle.read(dirBuf, 0, rootLen, rootOffset);
-    if (dirRead.bytesRead !== rootLen) continue;
+    const dirBuf = await readUserData(fileHandle, baseOffset, layout, rootLba, rootLen);
+    if (!dirBuf) continue;
 
     let off = 0;
     while (off < rootLen) {
       const recLen = dirBuf[off];
       if (recLen === 0) {
-        off = (Math.floor(off / layout.sectorSize) + 1) * layout.sectorSize;
+        // Directory records never straddle a logical block; zero padding means
+        // "continue at the next 2048-byte block".
+        off = (Math.floor(off / ISO_BLOCK_SIZE) + 1) * ISO_BLOCK_SIZE;
         continue;
       }
       if (off + recLen > rootLen || off + 33 > rootLen) break;
@@ -92,16 +129,14 @@ async function tryReadPs1IdFromSystemCnf(
           const sysLba = readLe32(dirBuf, off + 2);
           const sysSize = readLe32(dirBuf, off + 10);
           if (sysSize > 0 && sysSize < 4096) {
-            const sysOffset =
-              baseOffset + sysLba * layout.sectorSize + layout.modeOffset;
-            const sysBuf = Buffer.alloc(sysSize);
-            const sysRead = await fileHandle.read(
-              sysBuf,
-              0,
-              sysSize,
-              sysOffset
+            const sysBuf = await readUserData(
+              fileHandle,
+              baseOffset,
+              layout,
+              sysLba,
+              sysSize
             );
-            if (sysRead.bytesRead === sysSize) {
+            if (sysBuf) {
               const text = sysBuf.toString("latin1");
               PS1_GAME_ID_REGEX.lastIndex = 0;
               const match = text.match(PS1_GAME_ID_REGEX)?.[0];
