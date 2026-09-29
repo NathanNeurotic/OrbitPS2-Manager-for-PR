@@ -623,6 +623,68 @@ export async function normalizeRiptOplPs1Storage(params: {
     return { success: false, message: artworkPlan.message };
   }
 
+  let vmcOldPath: string | undefined;
+  let vmcTargetPath: string | undefined;
+  let vmcNeedsRename = false;
+
+  if (storageNeedsRename && params.kind === "VCD") {
+    vmcOldPath = path.join(path.dirname(sourcePath), currentName);
+    vmcTargetPath = path.join(path.dirname(sourcePath), safeTitle);
+
+    try {
+      const vmcStat = await fs.stat(vmcOldPath);
+      vmcNeedsRename = vmcStat.isDirectory();
+    } catch (err: unknown) {
+      if (
+        !(err instanceof Error) ||
+        !("code" in err) ||
+        (err as NodeJS.ErrnoException).code !== "ENOENT"
+      ) {
+        return {
+          success: false,
+          message:
+            "Could not inspect the existing PS1 VMC folder: " +
+            (err instanceof Error ? err.message : String(err)),
+        };
+      }
+    }
+
+    if (vmcNeedsRename && vmcTargetPath) {
+      const vmcCaseOnly =
+        vmcOldPath !== vmcTargetPath &&
+        vmcOldPath.toLocaleLowerCase() ===
+          vmcTargetPath.toLocaleLowerCase();
+
+      if (!vmcCaseOnly) {
+        try {
+          await fs.access(vmcTargetPath);
+          return {
+            success: false,
+            message:
+              'Cannot normalize VMC folder "' +
+              currentName +
+              '" because "' +
+              safeTitle +
+              '" already exists.',
+          };
+        } catch (err: unknown) {
+          if (
+            !(err instanceof Error) ||
+            !("code" in err) ||
+            (err as NodeJS.ErrnoException).code !== "ENOENT"
+          ) {
+            return {
+              success: false,
+              message:
+                "Could not check the VMC normalization target: " +
+                (err instanceof Error ? err.message : String(err)),
+            };
+          }
+        }
+      }
+    }
+  }
+
   if (storageNeedsRename) {
     const caseOnlyRename =
       sourcePath !== targetPath &&
@@ -670,10 +732,50 @@ export async function normalizeRiptOplPs1Storage(params: {
     }
   }
 
+  let vmcRenamed = false;
+  if (vmcNeedsRename && vmcOldPath && vmcTargetPath) {
+    try {
+      await renameCaseAware(vmcOldPath, vmcTargetPath, "vmc");
+      vmcRenamed = true;
+    } catch (err: unknown) {
+      if (storageNeedsRename) {
+        await renameCaseAware(
+          targetPath,
+          sourcePath,
+          "storage-rollback-vmc"
+        ).catch(() => undefined);
+      }
+      return {
+        success: false,
+        message:
+          "Failed to normalize the PS1 VMC folder: " +
+          (err instanceof Error ? err.message : String(err)),
+      };
+    }
+  }
+
   const artworkResult = await executeArtworkRenamePlan(
     artworkPlan.operations
   );
   if (!artworkResult.success) {
+    let rollbackMessage = "";
+
+    if (vmcRenamed && vmcOldPath && vmcTargetPath) {
+      try {
+        await renameCaseAware(
+          vmcTargetPath,
+          vmcOldPath,
+          "vmc-rollback"
+        );
+      } catch (rollbackErr: unknown) {
+        rollbackMessage +=
+          " VMC rollback failed: " +
+          (rollbackErr instanceof Error
+            ? rollbackErr.message
+            : String(rollbackErr));
+      }
+    }
+
     if (storageNeedsRename) {
       try {
         await renameCaseAware(
@@ -682,32 +784,35 @@ export async function normalizeRiptOplPs1Storage(params: {
           "storage-rollback"
         );
       } catch (rollbackErr: unknown) {
-        return {
-          success: false,
-          message:
-            artworkResult.message +
-            " Storage rollback also failed: " +
-            (rollbackErr instanceof Error
-              ? rollbackErr.message
-              : String(rollbackErr)),
-        };
+        rollbackMessage +=
+          " Storage rollback failed: " +
+          (rollbackErr instanceof Error
+            ? rollbackErr.message
+            : String(rollbackErr));
       }
     }
-    return { success: false, message: artworkResult.message };
-  }
 
-  // VMC folders follow the VCD title. Do this after artwork commits so an
-  // artwork failure can still restore the VCD itself.
-  if (storageNeedsRename && params.kind === "VCD") {
-    await renamePopsSubfolder(
-      path.dirname(targetPath),
-      currentName,
-      safeTitle
-    );
+    return {
+      success: false,
+      message: (artworkResult.message ?? "Artwork migration failed.") +
+        rollbackMessage,
+    };
   }
 
   const changed =
-    storageNeedsRename || artworkResult.renamed > 0;
+    storageNeedsRename ||
+    vmcRenamed ||
+    artworkResult.renamed > 0;
+
+  if (vmcRenamed) {
+    log.info(
+      'Normalized PS1 VMC folder: "' +
+        currentName +
+        '" → "' +
+        safeTitle +
+        '"'
+    );
+  }
 
   if (artworkResult.renamed > 0) {
     log.info(
