@@ -180,3 +180,18 @@ test("unknown digest never guesses a disc within a shared serial", () => {
   );
   assert.equal(match, null);
 });
+
+
+test("shared PVD serial without a verified disc rule remains ambiguous", async () => {
+  await withTempFile(
+    "3x3-eyes-shared.bin",
+    buildPs1Image("mode2", "PSX.EXE", "SCUS_941.63", "1995040719355400"),
+    async (filePath) => {
+      const result = await tryDeterminePs1GameIdFromHex(filePath);
+      assert.equal(result.success, true);
+      assert.equal(result.gameId, "SLPS_000.71");
+      assert.equal(result.identificationStatus, "ambiguous");
+      assert.equal(result.gameName, undefined);
+    },
+  );
+});
