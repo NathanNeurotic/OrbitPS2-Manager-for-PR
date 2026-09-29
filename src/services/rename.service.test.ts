@@ -116,3 +116,97 @@ test("duplicate old-name and GameID artwork targeting one slot is refused", asyn
     await fs.access(path.join(artDir, "SCUS_944.25_COV.jpg"));
   });
 });
+
+
+test("indexed artwork suffixes migrate with the full type intact", async () => {
+  await withTempDir(async (dir) => {
+    const gamesDir = path.join(dir, "EMBER", "games");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(gamesDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const gameFolder = path.join(gamesDir, "Spyro4");
+    await fs.mkdir(gameFolder);
+    await fs.writeFile(path.join(artDir, "Spyro4_SCR_00.png"), "shot");
+    await fs.writeFile(path.join(artDir, "Spyro4_BG_02.png"), "bg");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "EMBER",
+      sourcePath: gameFolder,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_SCR_00.png"),
+        "utf8"
+      ),
+      "shot"
+    );
+    assert.equal(
+      await fs.readFile(
+        path.join(artDir, "SPYRO 2 - RIPTO'S RAGE_BG_02.png"),
+        "utf8"
+      ),
+      "bg"
+    );
+  });
+});
+
+test("VMC target collision stops VCD normalization before any rename", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const oldVcd = path.join(popsDir, "Spyro4.VCD");
+    await fs.writeFile(oldVcd, "vcd");
+    await fs.mkdir(path.join(popsDir, "Spyro4"));
+    await fs.mkdir(path.join(popsDir, "SPYRO 2 - RIPTO'S RAGE"));
+    await fs.writeFile(path.join(artDir, "Spyro4_COV.png"), "cover");
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: oldVcd,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.message ?? "", /VMC folder.*already exists/i);
+    await fs.access(oldVcd);
+    await fs.access(path.join(popsDir, "Spyro4"));
+    await fs.access(path.join(artDir, "Spyro4_COV.png"));
+  });
+});
+
+test("VMC folder follows a successful canonical VCD rename", async () => {
+  await withTempDir(async (dir) => {
+    const popsDir = path.join(dir, "POPS");
+    const artDir = path.join(dir, "ART");
+    await fs.mkdir(popsDir, { recursive: true });
+    await fs.mkdir(artDir, { recursive: true });
+
+    const oldVcd = path.join(popsDir, "Spyro4.VCD");
+    await fs.writeFile(oldVcd, "vcd");
+    await fs.mkdir(path.join(popsDir, "Spyro4"));
+
+    const result = await normalizeRiptOplPs1Storage({
+      kind: "VCD",
+      sourcePath: oldVcd,
+      gameId: "SCUS_944.25",
+      canonicalTitle: "SPYRO 2 - RIPTO'S RAGE",
+      artDir,
+    });
+
+    assert.equal(result.success, true);
+    await fs.access(path.join(popsDir, "SPYRO 2 - RIPTO'S RAGE.VCD"));
+    await fs.access(path.join(popsDir, "SPYRO 2 - RIPTO'S RAGE"));
+    await assert.rejects(() => fs.access(path.join(popsDir, "Spyro4")));
+  });
+});
