@@ -573,15 +573,18 @@ export class LibraryService {
       cuePath: string;
       gameId?: string;
       gameName?: string;
+      identificationStatus?: Game['identificationStatus'];
       sizeBytes: number;
     }>
   ): Game[] {
     return entries.map((entry) => ({
       filename: entry.folderName,
       title: entry.gameName || entry.folderName,
-      canonicalTitle: entry.gameName
-        ? sanitizeGameFilename(entry.gameName)
-        : undefined,
+      canonicalTitle:
+        entry.identificationStatus === 'identified' && entry.gameName
+          ? sanitizeGameFilename(entry.gameName)
+          : undefined,
+      identificationStatus: entry.identificationStatus,
       cdType: 'EMBER',
       gameId: entry.gameId || '',
       region: entry.gameId ? this.mapGameIdToRegion(entry.gameId) : 'UNKNOWN',
@@ -620,6 +623,7 @@ export class LibraryService {
     let gameId: string;
     let title: string;
     let canonicalTitle: string | undefined;
+    let identificationStatus: Game['identificationStatus'];
     let ps1Launcher: Ps1LauncherInfo | undefined;
 
     if (gameIdMatch) {
@@ -643,17 +647,27 @@ export class LibraryService {
       // for images Orbit cannot resolve, never the source of canonical naming.
       this.setCurrentAction(`Resolving VCD ${file.name}…`);
       const resolved = await window.libraryAPI.tryDeterminePs1GameIdFromVcd(file.path);
+      identificationStatus = resolved?.identificationStatus;
       if (resolved?.success && resolved.gameId) {
         gameId = resolved.gameId;
-        canonicalTitle = resolved.gameName
-          ? sanitizeGameFilename(resolved.gameName)
-          : undefined;
-        title = resolved.gameName || file.name;
+        canonicalTitle =
+          resolved.identificationStatus === 'identified' && resolved.gameName
+            ? sanitizeGameFilename(resolved.gameName)
+            : undefined;
+        title =
+          resolved.identificationStatus === 'identified' && resolved.gameName
+            ? resolved.gameName
+            : file.name;
       } else if (ps1Launcher?.gameId) {
         gameId = ps1Launcher.gameId;
         title = file.name;
+        identificationStatus = 'unidentified';
       } else {
-        return null;
+        // Keep unidentified VCDs visible for manual management. Their
+        // filenames are storage identities, never proof of disc identity.
+        gameId = '';
+        title = file.name;
+        identificationStatus = resolved?.identificationStatus ?? 'unidentified';
       }
     }
 
@@ -661,12 +675,16 @@ export class LibraryService {
     // itself so a user-supplied filename never overrides the actual PS1 ID.
     if (ext === '.vcd' && gameIdMatch) {
       const resolved = await window.libraryAPI.tryDeterminePs1GameIdFromVcd(file.path);
+      identificationStatus = resolved?.identificationStatus;
       if (resolved?.success && resolved.gameId) {
         gameId = resolved.gameId;
-        canonicalTitle = resolved.gameName
-          ? sanitizeGameFilename(resolved.gameName)
-          : undefined;
-        title = resolved.gameName || title;
+        canonicalTitle =
+          resolved.identificationStatus === 'identified' && resolved.gameName
+            ? sanitizeGameFilename(resolved.gameName)
+            : undefined;
+        if (resolved.identificationStatus === 'identified' && resolved.gameName) {
+          title = resolved.gameName;
+        }
       }
     }
 
@@ -680,7 +698,7 @@ export class LibraryService {
       title,
       cdType: hasLauncher ? 'APPS' : isPops ? 'POPS' : dirName,
       gameId,
-      region: this.mapGameIdToRegion(gameId),
+      region: gameId ? this.mapGameIdToRegion(gameId) : 'UNKNOWN',
       path: file.path,
       extension: file.extension,
       parentPath: file.parentPath,
@@ -688,6 +706,7 @@ export class LibraryService {
       system: hasLauncher ? 'APPS' : isPops || isVcd ? 'PS1' : 'PS2',
       size: this.formatFileSize(file.stats!.size) || '??',
       canonicalTitle,
+      identificationStatus,
     };
 
     if (hasLauncher) {
