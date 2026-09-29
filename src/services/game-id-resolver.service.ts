@@ -106,7 +106,7 @@ async function readUserData(
 async function tryReadPs1IdFromSystemCnf(
   fileHandle: fs.FileHandle,
   baseOffset = 0
-): Promise<{ gameId: string; timestamp: string } | null> {
+): Promise<string | null> {
   for (const layout of SECTOR_LAYOUTS) {
     const pvd = await readUserData(fileHandle, baseOffset, layout, 16, ISO_BLOCK_SIZE);
     if (
@@ -202,7 +202,7 @@ async function tryReadPs1IdFromSystemCnf(
 async function tryReadPs1IdFromPvdTimestamp(
   fileHandle: fs.FileHandle,
   baseOffset = 0
-): Promise<string | null> {
+): Promise<{ gameId: string; timestamp: string } | null> {
   for (const layout of SECTOR_LAYOUTS) {
     const pvd = await readUserData(
       fileHandle,
