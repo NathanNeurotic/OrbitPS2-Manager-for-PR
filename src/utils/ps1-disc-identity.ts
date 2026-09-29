@@ -25,7 +25,6 @@ const knownConflicts = new Set(
   (conflicts.conflicts as string[]).map((id) => normalizeDiscId(id)),
 );
 const wholeFileRules = conflicts.wholeFile as ConflictRule[];
-const dataTrackRules = conflicts.dataTrack as ConflictRule[];
 
 function normalizeDiscId(id: string): string {
   const compact = id.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -228,15 +227,14 @@ async function md5Range(
  * Resolve a PS1 disc whose internal serial is known to be shared by multiple
  * discs/editions.
  *
- * GDX-X/PFS-BatchKit-Manager provides checksum rules over the complete input
- * file. Redump-derived rules provide checksums/sizes for raw data tracks. The
- * two inputs are deliberately kept separate: a POPS VCD header or a CUE track
- * offset must never be treated as part of a Redump data-track checksum.
+ * GDX-X/PFS-BatchKit-Manager provides the small shared-serial checksum table.
+ * Orbit checks the exact input first and, for POPS VCDs, the payload forms that
+ * can correspond to the original BIN before deciding a shared serial is safe.
  */
 export async function matchPs1Conflict(
   filePath: string,
   internalGameId: string,
-  dataTrackOffset = 0,
+  _dataTrackOffset = 0,
 ): Promise<Ps1ConflictMatch | null> {
   const internalId = normalizeDiscId(internalGameId);
   if (!knownConflicts.has(internalId)) return null;
@@ -254,28 +252,6 @@ export async function matchPs1Conflict(
     }
   }
 
-  const trackRules = dataTrackRules.filter(
-    (rule) => normalizeDiscId(rule.internalId) === internalId && !!rule.size,
-  );
-  const digests = new Map<number, string | null>();
-
-  for (const rule of trackRules) {
-    const size = Number(rule.size);
-    if (!Number.isFinite(size) || size <= 0 || dataTrackOffset + size > stat.size) {
-      continue;
-    }
-    if (!digests.has(size)) {
-      digests.set(size, await md5Range(filePath, dataTrackOffset, size));
-    }
-    if (digests.get(size)?.toLowerCase() === rule.md5.toLowerCase()) {
-      return {
-        internalId,
-        discId: normalizeDiscId(rule.discId),
-        title: rule.title,
-        method: "md5",
-      };
-    }
-  }
 
   return null;
 }
