@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import path from "path";
 import { createLogger } from "../logger";
 import { getAssetsDir } from "./resource-path";
+import { isKnownPs1Conflict } from "./ps1-disc-identity";
 
 const log = createLogger("games-list");
 
@@ -75,13 +76,19 @@ export async function findPs1GameName(gameId: string) {
   }
 
   const key = gameId.toUpperCase();
-  if (cachedPs1AmbiguousIds.has(key)) {
+  if (cachedPs1AmbiguousIds.has(key) || isKnownPs1Conflict(gameId)) {
     log.warn(
       `PS1 serial ${key} maps to multiple titles; refusing canonical title selection`
     );
     return undefined;
   }
   return list.get(key);
+}
+
+export async function isPs1GameIdAmbiguous(gameId: string): Promise<boolean> {
+  await loadPs1GamesList();
+  const key = gameId.toUpperCase();
+  return cachedPs1AmbiguousIds.has(key) || isKnownPs1Conflict(gameId);
 }
 
 const PS2_GAMES_LIST_CANDIDATE_PATHS = [
