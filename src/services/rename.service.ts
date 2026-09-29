@@ -83,7 +83,9 @@ async function renameMatchingCoverArt(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed || !matches(parsed.identity)) continue;
 
-    const newName = `${newBaseName}_${parsed.type}${ext}`;
+    const targetType =
+      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const newName = `${newBaseName}_${targetType}${ext}`;
     if (newName === name) continue;
     try {
       await fs.rename(path.join(artDir, name), path.join(artDir, newName));
@@ -123,7 +125,9 @@ async function copyMatchingCoverArt(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed || !matches(parsed.identity)) continue;
 
-    const targetName = `${newBaseName}_${parsed.type}${ext}`;
+    const targetType =
+      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const targetName = `${newBaseName}_${targetType}${ext}`;
     if (targetName.toLocaleLowerCase() === name.toLocaleLowerCase()) continue;
 
     const sourcePath = path.join(artDir, name);
@@ -195,7 +199,9 @@ async function planMatchingCoverArtRenames(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed || !matches(parsed.identity)) continue;
 
-    const targetName = newBaseName + "_" + parsed.type + ext;
+    const targetType =
+      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const targetName = newBaseName + "_" + targetType + ext;
     if (targetName === name) continue;
 
     const sourceLower = name.toLocaleLowerCase();
@@ -950,14 +956,29 @@ export async function convertPs1LauncherToPopsLoader(
     return { success: false, newVcdPath, message: msg };
   }
 
-  onProgress?.(88, "Renaming cover art to match the new filename…");
-  const gameIdUpper = gameId.toUpperCase();
-  await renameMatchingCoverArt(
-    path.join(oplRoot, "ART"),
-    (nameBeforeType) => nameBeforeType.toUpperCase().includes(gameIdUpper),
+  onProgress?.(88, "Renaming VCD artwork to match the new filename…");
+  const artDir = path.join(oplRoot, "ART");
+  const oldVcdStem = vcdBasename.slice(0, -vcdExt.length);
+  const oldVcdStemLower = oldVcdStem.toLowerCase();
+  const renamedVcdArt = await renameMatchingCoverArt(
+    artDir,
+    (nameBeforeType) => nameBeforeType.toLowerCase() === oldVcdStemLower,
     targetTitle,
     onProgress,
   );
+
+  // Older layouts may only have the strict GameID fallback file. Use it only
+  // when no exact VCD-stem art was available; launcher ELF art is deliberately
+  // not folded in because it is a separate Apps identity and may be customized.
+  if (renamedVcdArt === 0) {
+    const gameIdLower = gameId.toLowerCase();
+    await renameMatchingCoverArt(
+      artDir,
+      (nameBeforeType) => nameBeforeType.toLowerCase() === gameIdLower,
+      targetTitle,
+      onProgress,
+    );
+  }
 
   onProgress?.(PROGRESS_DONE, "Conversion complete");
   log.info(`PS1 convert-to-POPSLoader complete: "${vcdBasename}" → "${newVcdBasename}"`);
