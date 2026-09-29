@@ -386,6 +386,105 @@ export async function renamePs1LauncherStep2(
 }
 
 /**
+ * Normalize a RiptOPL PS1 storage identity before artwork is downloaded.
+ *
+ * VCD artwork keys off the VCD filename stem, while Ember artwork keys off the
+ * per-game folder name. Identification is handled separately from disc data;
+ * this function only makes the on-disk identity match the canonical title.
+ */
+export async function normalizeRiptOplPs1Storage(params: {
+  kind: "VCD" | "EMBER";
+  sourcePath: string;
+  gameId: string;
+  canonicalTitle: string;
+  artDir: string;
+}): Promise<{
+  success: boolean;
+  changed?: boolean;
+  newPath?: string;
+  localName?: string;
+  message?: string;
+}> {
+  const safeTitle = sanitizeGameFilename(params.canonicalTitle);
+  if (!safeTitle) {
+    return { success: false, message: "Canonical PS1 title is empty after sanitization." };
+  }
+
+  const sourcePath = path.resolve(params.sourcePath);
+  const currentName =
+    params.kind === "VCD"
+      ? path.basename(sourcePath, path.extname(sourcePath))
+      : path.basename(sourcePath);
+
+  if (currentName === safeTitle) {
+    return {
+      success: true,
+      changed: false,
+      newPath: sourcePath,
+      localName: safeTitle,
+    };
+  }
+
+  const targetPath =
+    params.kind === "VCD"
+      ? path.join(path.dirname(sourcePath), `${safeTitle}${path.extname(sourcePath)}`)
+      : path.join(path.dirname(sourcePath), safeTitle);
+
+  try {
+    await fs.access(targetPath);
+    return {
+      success: false,
+      message: `Cannot normalize "${currentName}" because "${safeTitle}" already exists.`,
+    };
+  } catch (err: unknown) {
+    if (
+      !(err instanceof Error) ||
+      !("code" in err) ||
+      (err as NodeJS.ErrnoException).code !== "ENOENT"
+    ) {
+      return {
+        success: false,
+        message: `Could not check normalization target: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  try {
+    await fs.rename(sourcePath, targetPath);
+  } catch (err: unknown) {
+    return {
+      success: false,
+      message: `Failed to normalize ${params.kind} identity: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (params.kind === "VCD") {
+    await renamePopsSubfolder(path.dirname(targetPath), currentName, safeTitle);
+  }
+
+  const currentUpper = currentName.toUpperCase();
+  const gameIdUpper = params.gameId.toUpperCase();
+  await renameMatchingCoverArt(
+    params.artDir,
+    (nameBeforeType) => {
+      const upper = nameBeforeType.toUpperCase();
+      return upper === currentUpper || (!!gameIdUpper && upper === gameIdUpper);
+    },
+    safeTitle,
+  );
+
+  log.info(
+    `Normalized RiptOPL ${params.kind} identity: "${currentName}" → "${safeTitle}"`
+  );
+  return {
+    success: true,
+    changed: true,
+    newPath: targetPath,
+    localName: safeTitle,
+  };
+}
+
+/**
  * Converts a POPStarter-launched PS1 game to POPSLoader style: strips the
  * "<GameID>." prefix from the VCD filename, deletes the APPS launcher
  * folder, and renames any matching ART/ files (previously keyed by GameID

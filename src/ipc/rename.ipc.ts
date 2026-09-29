@@ -4,6 +4,7 @@ import {
   renamePs1LauncherStep2,
   convertPs1LauncherToPopsLoader,
   convertPs1LauncherToPopstarter,
+  normalizeRiptOplPs1Storage,
 } from "../services/rename.service";
 
 export function registerRenameIpc(): void {
@@ -37,6 +38,20 @@ export function registerRenameIpc(): void {
         event.sender.send("rename-ps1-progress", { percent, stage });
       });
     }
+  );
+
+  ipcMain.handle(
+    "normalize-riptopl-ps1-storage",
+    async (
+      _event,
+      params: {
+        kind: "VCD" | "EMBER";
+        sourcePath: string;
+        gameId: string;
+        canonicalTitle: string;
+        artDir: string;
+      }
+    ) => normalizeRiptOplPs1Storage(params)
   );
 
   ipcMain.handle(

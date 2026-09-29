@@ -74,15 +74,18 @@ export async function tryDetermineGameIdFromHex(filepath: string) {
   if (path.extname(filepath).toLowerCase() === ".cue") {
     try {
       const cueSheet = await parseCueSheet(filepath);
-      const firstFile = cueSheet.files[0]?.filename;
-      if (!firstFile) {
+      const dataFile =
+        cueSheet.files.find((file) =>
+          file.tracks.some((track) => /^MODE[12]\//i.test(track.type))
+        )?.filename || cueSheet.files[0]?.filename;
+      if (!dataFile) {
         return {
           success: false,
-          message: "CUE sheet does not reference any BIN files.",
+          message: "CUE sheet does not reference a readable data track.",
         };
       }
-      scanPath = path.join(getCueDirectory(filepath), firstFile);
-      log.verbose(`PS2 hex scan: resolved CUE to first BIN ${firstFile}`);
+      scanPath = path.join(getCueDirectory(filepath), dataFile);
+      log.verbose(`PS2 hex scan: resolved CUE data track to ${dataFile}`);
     } catch (err: any) {
       log.error(`PS2 hex scan: failed to parse CUE ${filepath}:`, err?.message || err);
       return {
@@ -357,15 +360,18 @@ export async function tryDeterminePs1GameIdFromHex(filepath: string) {
     if (path.extname(scanPath).toLowerCase() === ".cue") {
       try {
         const cueSheet = await parseCueSheet(scanPath);
-        const firstFile = cueSheet.files[0]?.filename;
-        if (!firstFile) {
+        const dataFile =
+          cueSheet.files.find((file) =>
+            file.tracks.some((track) => /^MODE[12]\//i.test(track.type))
+          )?.filename || cueSheet.files[0]?.filename;
+        if (!dataFile) {
           return {
             success: false,
-            message: "CUE sheet does not reference any BIN files.",
+            message: "CUE sheet does not reference a readable PS1 data track.",
           };
         }
-        scanPath = path.join(getCueDirectory(scanPath), firstFile);
-        log.verbose(`PS1 hex scan: resolved CUE to first BIN ${firstFile}`);
+        scanPath = path.join(getCueDirectory(scanPath), dataFile);
+        log.verbose(`PS1 hex scan: resolved CUE data track to ${dataFile}`);
       } catch (err: any) {
         log.error(`PS1 hex scan: failed to parse CUE ${scanPath}:`, err?.message || err);
         return {
