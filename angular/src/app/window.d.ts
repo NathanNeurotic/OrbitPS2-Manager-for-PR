@@ -461,6 +461,17 @@ declare interface Window {
       message?: string;
     }>;
 
+    /** Delete an Ember game directory and artwork keyed by its folder name. */
+    deleteEmberGameAndRelatedFiles: (
+      gamePath: string,
+      artDir: string,
+      identity: string,
+    ) => Promise<{
+      success: boolean;
+      entries: Array<{ label: string; path?: string; success: boolean; error?: string }>;
+      message?: string;
+    }>;
+
     /** Move a file from source to destination. */
     moveFile: (sourcePath: string, destPath: string) => Promise<any>;
 
