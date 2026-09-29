@@ -134,6 +134,10 @@ async function wholeInputMd5Candidates(
   filePath: string,
   fileSize: number,
 ): Promise<string[]> {
+  const digests: string[] = [];
+  const exact = await md5Range(filePath, 0, fileSize);
+  if (exact) digests.push(exact);
+
   const handle = await fs.open(filePath, "r");
   let isVcd = false;
   try {
@@ -146,14 +150,11 @@ async function wholeInputMd5Candidates(
   }
 
   if (!isVcd) {
-    const digest = await md5Range(filePath, 0, fileSize);
-    return digest ? [digest] : [];
+    return digests;
   }
-
-  const digests: string[] = [];
   const payloadSize = fileSize - VCD_HEADER_SIZE;
   const direct = await md5Range(filePath, VCD_HEADER_SIZE, payloadSize);
-  if (direct) digests.push(direct);
+  if (direct && !digests.includes(direct)) digests.push(direct);
 
   const gapOffset = await vcdInsertedGapOffset(filePath, fileSize);
   if (gapOffset !== null) {
