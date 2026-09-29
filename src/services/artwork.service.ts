@@ -3,6 +3,7 @@ import path from "path";
 import https from "https";
 import { createLogger, formatBytes } from "../logger";
 import { artRemoteFileNames, artSlotFileNames } from "./artwork-filenames";
+import { normalizeArtworkPng } from "../utils/png-artwork";
 
 const log = createLogger("artwork");
 
@@ -140,12 +141,14 @@ export async function downloadArtByGameId(
         continue;
       }
 
+      let outputBuffer: Buffer;
       try {
-        await fs.writeFile(savePath, buffer);
+        outputBuffer = normalizeArtworkPng(buffer, system, saveType);
+        await fs.writeFile(savePath, outputBuffer);
       } catch (err: any) {
-        // The bytes are already in hand, so a local write failure says nothing
-        // about the remaining candidates: fetching them again would re-download
-        // this same image once per URL left and 404 on all of them.
+        // The bytes are already in hand, so a local transform/write failure says
+        // nothing about the remaining candidates: fetching them again would
+        // only re-download another incompatible copy.
         lastError = new Error(
           `Failed to save ${type} artwork to ${savePath}: ${err.message}`
         );
@@ -153,7 +156,9 @@ export async function downloadArtByGameId(
         break;
       }
 
-      log.verbose(`Saved ${type} artwork (${formatBytes(buffer.length)}) → ${savePath}`);
+      log.verbose(
+        `Saved ${type} artwork (${formatBytes(outputBuffer.length)}) → ${savePath}`
+      );
       results.push({
         name: localName,
         type,
