@@ -217,6 +217,20 @@ export class ArtworkWizardDialogComponent {
 
   async ngOnInit() {
     const g = this.game();
+    if (
+      g.system === 'PS1' &&
+      !this.isPs1Launcher &&
+      g.identificationStatus !== undefined &&
+      g.identificationStatus !== 'identified'
+    ) {
+      this.errorMessage.set(
+        g.identificationStatus === 'ambiguous'
+          ? 'This PS1 serial is shared by multiple discs or editions and could not be resolved safely. Artwork download is disabled until the disc is identified.'
+          : 'This PS1 disc could not be identified safely. Artwork download is disabled until the disc is identified.',
+      );
+      this.loading.set(false);
+      return;
+    }
     try {
       const result = await window.libraryAPI.listAvailableArt(g.gameId, this.system);
 
@@ -490,6 +504,14 @@ export class ArtworkWizardDialogComponent {
 
   download(): void {
     const g = this.game();
+    if (
+      g.system === 'PS1' &&
+      !this.isPs1Launcher &&
+      g.identificationStatus !== undefined &&
+      g.identificationStatus !== 'identified'
+    ) {
+      return;
+    }
     let types = Array.from(this.selected());
     if (types.length === 0) return;
 
