@@ -1,5 +1,10 @@
 import { createHash } from "crypto";
 import * as fs from "fs/promises";
+import path from "path";
+import {
+  getCachedPs1Digests,
+  setCachedPs1Digests,
+} from "../services/iso-cache.service";
 import conflicts from "../data/ps1-disc-conflicts.json";
 import { VCD_HEADER_SIZE } from "./game-id-patterns";
 
@@ -136,6 +141,15 @@ async function wholeInputMd5Candidates(
   const cached = conflictDigestCache.get(cacheKey);
   if (cached) return [...cached];
 
+  // A full MD5 of a PS1 image is the most expensive step of identification;
+  // keep the digests across app restarts so library refreshes stay cheap.
+  const absPath = path.resolve(filePath);
+  const persisted = getCachedPs1Digests(absPath, stat.size, stat.mtimeMs);
+  if (persisted) {
+    conflictDigestCache.set(cacheKey, [...persisted]);
+    return persisted;
+  }
+
   const handle = await fs.open(filePath, "r");
   let isVcd = false;
   try {
@@ -218,7 +232,13 @@ async function wholeInputMd5Candidates(
   }
 
   conflictDigestCache.set(cacheKey, [...digests]);
+  setCachedPs1Digests(absPath, stat.size, stat.mtimeMs, digests);
   return digests;
+}
+
+/** Test seam: forget in-memory digests so the persistent cache is consulted. */
+export function clearPs1DigestMemoryCache(): void {
+  conflictDigestCache.clear();
 }
 
 /**
