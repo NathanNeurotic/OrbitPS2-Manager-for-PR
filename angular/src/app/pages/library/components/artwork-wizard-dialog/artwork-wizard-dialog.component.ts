@@ -3,6 +3,13 @@ import { LucideAngularModule } from 'lucide-angular';
 import { Game } from '@shared/types/game.type';
 import { JobsService, NewImportJob } from '@shared/services/jobs.service';
 import { LibraryService } from '@shared/services/library.service';
+import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
+import {
+  ps1ArtworkIdentities,
+  ps1CanonicalRename,
+  ps1CanonicalRenameConfirm,
+  ps1CanonicalStorageName,
+} from '@shared/utils/ps1-canonical-rename';
 import {
   ART_CATEGORIES,
   artCategoryForType,
@@ -13,13 +20,6 @@ import {
   MAX_SCREENSHOTS,
   UNCATEGORIZED_LABEL,
 } from '@shared/constants/artwork-presets';
-import {
-  ps1ArtworkIdentities,
-  ps1CanonicalRename,
-  ps1CanonicalRenameConfirm,
-  ps1CanonicalStorageName,
-} from '@shared/utils/ps1-artwork-identities';
-import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
 
 interface ArtworkOption {
   type: string;
@@ -86,6 +86,8 @@ export class ArtworkWizardDialogComponent {
 
   /** Save bases already present in the ART folder, e.g. `SCR`, `SCR2`, `COV`. */
   private readonly existingSaveFiles = signal<ReadonlySet<string>>(new Set());
+  /** Prevent duplicate normalize/download jobs while the rename prompt is open. */
+  private confirmingRename = false;
 
   /**
    * File base every option is written under. The selected types are listed
@@ -205,12 +207,32 @@ export class ArtworkWizardDialogComponent {
     return g.gameId;
   }
 
-  private get ps1ArtIdentities(): string[] {
+  /**
+   * Current PS1 artwork identities the loader can actually resolve. VCDs only
+   * gain the GameID fallback when the ID is a strict prefix of the VCD stem;
+   * Ember is folder-name keyed only.
+   */
+  private get ps1CurrentArtIdentities(): string[] | undefined {
+    if (this.system !== 'PS1' || this.isPs1Launcher) return undefined;
     return ps1ArtworkIdentities(this.game());
   }
 
   async ngOnInit() {
     const g = this.game();
+    if (
+      g.system === 'PS1' &&
+      !this.isPs1Launcher &&
+      g.identificationStatus !== undefined &&
+      g.identificationStatus !== 'identified'
+    ) {
+      this.errorMessage.set(
+        g.identificationStatus === 'ambiguous'
+          ? 'This PS1 serial is shared by multiple discs or editions and could not be resolved safely. Artwork download is disabled until the disc is identified.'
+          : 'This PS1 disc could not be identified safely. Artwork download is disabled until the disc is identified.',
+      );
+      this.loading.set(false);
+      return;
+    }
     try {
       const result = await window.libraryAPI.listAvailableArt(g.gameId, this.system);
 
@@ -228,16 +250,16 @@ export class ArtworkWizardDialogComponent {
 
       const dirPath = this._library.currentDirectoryValue;
       const localName = this.localName;
-      // RiptOPL-readable local names for this game: the VCD filename stem plus
-      // the GameID only when that stem starts with it. PS2/launcher games fall
-      // back to the single GameID/boot name.
-      const identities = this.ps1ArtIdentities;
+      const ps1CurrentArtIdentities = this.ps1CurrentArtIdentities;
       // Existence is probed by save base, not by database code: art is stored as
       // the file OPL reads, and a screenshot can land on either of the two
       // slots, so both are probed for every screenshot. The exact stem each base
       // may be saved under is kept so a hit maps back to its base unambiguously
       // (`SLUS` must not swallow `SLUS_Title_COV.png`).
-      const stems = identities.length > 0 ? identities : [localName];
+      const stems =
+        ps1CurrentArtIdentities === undefined
+          ? [localName]
+          : [...new Set([localName, ...ps1CurrentArtIdentities])];
       const baseOfFile = new Map<string, string>();
       for (const stem of stems) {
         for (const d of result.data) {
@@ -484,6 +506,14 @@ export class ArtworkWizardDialogComponent {
 
   download(): void {
     const g = this.game();
+    if (
+      g.system === 'PS1' &&
+      !this.isPs1Launcher &&
+      g.identificationStatus !== undefined &&
+      g.identificationStatus !== 'identified'
+    ) {
+      return;
+    }
     let types = Array.from(this.selected());
     if (types.length === 0) return;
 
@@ -521,11 +551,9 @@ export class ArtworkWizardDialogComponent {
       gameName: g.title || '',
       downloadArtwork: false,
       system: this.system,
-      // PS1 VCDs save under their on-disk filename stem so RiptOPL reads them
-      // from `ART/<VCD_FILENAME>_<TYPE>.png`; launchers keep the boot ELF name.
       saveAsName: this.isPs1Launcher
         ? g.ps1LauncherBoot
-        : this.system === 'PS1'
+        : g.system === 'PS1'
           ? this.localName
           : undefined,
       normalizeKind:
@@ -538,25 +566,25 @@ export class ArtworkWizardDialogComponent {
         g.system === 'PS1' && !this.isPs1Launcher
           ? ps1CanonicalStorageName(g)
           : undefined,
-        artTypes: types,
-        artSaveAsOverrides:
-          Object.keys(artSaveAsOverrides).length > 0
-            ? artSaveAsOverrides
-            : undefined,
-        // `true` — the reviewed selection knowingly replaces files on disk;
-        // `false` — "skip existing" is on, so fetch only what is missing;
-        // `undefined` — nothing selected exists yet, nothing to confirm.
-        //
-        // The three states must not be collapsed. Sending `true` whenever skip is
-        // off silently replaced artwork a user had already curated, and the
-        // footer was still labelled "Download Selected". Sending `undefined`
-        // under a skip policy would instead let the worker pop a confirmation
-        // for a run that is only ever meant to fill gaps.
-        overwrite: this.willOverwriteSelected()
-          ? true
-          : this.skipExisting()
-            ? false
-            : undefined,
+      artTypes: types,
+      artSaveAsOverrides:
+        Object.keys(artSaveAsOverrides).length > 0
+          ? artSaveAsOverrides
+          : undefined,
+      // `true` — the reviewed selection knowingly replaces files on disk;
+      // `false` — "skip existing" is on, so fetch only what is missing;
+      // `undefined` — nothing selected exists yet, nothing to confirm.
+      //
+      // The three states must not be collapsed. Sending `true` whenever skip is
+      // off silently replaced artwork a user had already curated, and the
+      // footer was still labelled "Download Selected". Sending `undefined`
+      // under a skip policy would instead let the worker pop a confirmation
+      // for a run that is only ever meant to fill gaps.
+      overwrite: this.willOverwriteSelected()
+        ? true
+        : this.skipExisting()
+          ? false
+          : undefined,
     };
 
     // RiptOPL keys PS1 artwork by the VCD/Ember folder name, so the job renames
@@ -569,11 +597,18 @@ export class ArtworkWizardDialogComponent {
       return;
     }
 
-    void this._confirm.confirm(ps1CanonicalRenameConfirm([rename])).then((proceed) => {
-      if (!proceed) return;
-      this._jobs.enqueue([job]);
-      this.close();
-    });
+    if (this.confirmingRename) return;
+    this.confirmingRename = true;
+    void this._confirm
+      .confirm(ps1CanonicalRenameConfirm([rename]))
+      .then((proceed) => {
+        if (!proceed) return;
+        this._jobs.enqueue([job]);
+        this.close();
+      })
+      .finally(() => {
+        this.confirmingRename = false;
+      });
   }
 
   close(): void {

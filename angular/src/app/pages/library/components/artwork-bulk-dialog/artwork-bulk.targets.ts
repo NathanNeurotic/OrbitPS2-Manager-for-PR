@@ -1,14 +1,14 @@
 import { Game } from '@shared/types/game.type';
 import {
-  artSaveNameForType,
   KNOWN_ART_TYPES,
+  artSaveNameForType,
 } from '@shared/constants/artwork-presets';
 import {
   ps1ArtworkIdentities,
   ps1CanonicalRename,
   ps1CanonicalStorageName,
   ps1StorageIdentity,
-} from '@shared/utils/ps1-artwork-identities';
+} from '@shared/utils/ps1-canonical-rename';
 
 /** Which section of the library an artwork bulk run should target. */
 export type ArtScope = 'PS2' | 'PS1' | 'APPS' | 'ALL';
@@ -47,6 +47,14 @@ function needsPs1Normalization(game: Game): boolean {
 export function eligibleGamesForScope(games: Game[], scope: ArtScope): Game[] {
   return games.filter((g) => {
     if (!g.gameId) return false;
+    if (
+      g.system === 'PS1' &&
+      !g.isPs1Launcher &&
+      g.identificationStatus !== undefined &&
+      g.identificationStatus !== 'identified'
+    ) {
+      return false;
+    }
     switch (scope) {
       case 'PS2':
         return (g.system ?? 'PS2') === 'PS2';

@@ -76,13 +76,9 @@ export interface ImportJob {
    * matching logic in updateArtForGame.
    */
   saveAsName?: string;
-  /**
-   * Artwork only, RiptOPL PS1: the storage identity that must be normalized to
-   * `canonicalName` before the art files are written. RiptOPL resolves PS1 art
-   * by the on-disk VCD/Ember name, so art has to land under the final name.
-   */
+  /** RiptOPL PS1 only: storage identity that must be normalized before art is saved. */
   normalizeKind?: 'VCD' | 'EMBER';
-  /** Artwork only: RiptOPL-safe PS1 storage name to normalize to before download. */
+  /** RiptOPL PS1 only: canonical title resolved from disc contents. */
   canonicalName?: string;
   /**
    * Artwork only: whether to overwrite existing art files. When `false` only
@@ -145,6 +141,9 @@ export class JobsService {
    *  ART folder for every finished game, the ids are accumulated here and
    *  flushed once the whole queue drains. */
   private pendingArtRefresh = new Set<string>();
+
+  /** A storage-changing job needs one full library rescan after the queue drains. */
+  private pendingFullRefresh = false;
 
   constructor(
     private readonly _logger: LogsService,
@@ -221,8 +220,14 @@ export class JobsService {
     }
     const next = this.jobsSubject.value.find((j) => j.status === 'queued');
     if (!next) {
-      // Queue drained — flush any deferred artwork refresh in a single scan.
-      this.flushPendingArtRefresh();
+      // Queue drained — a full rescan supersedes any artwork-only refresh.
+      if (this.pendingFullRefresh) {
+        this.pendingFullRefresh = false;
+        this.pendingArtRefresh.clear();
+        void this._library.refreshGamesFiles();
+      } else {
+        this.flushPendingArtRefresh();
+      }
       return;
     }
 
@@ -236,6 +241,10 @@ export class JobsService {
     try {
       const result = await this.runJob(next);
       if (result?.cancelled) {
+        if (result?.artRefresh === false) {
+          this.pendingArtRefresh.clear();
+          this.pendingFullRefresh = true;
+        }
         this.patchJob(next.id, {
           status: 'cancelled',
           percent: 100,
@@ -257,13 +266,20 @@ export class JobsService {
         // (bulk flows queue one job per game and would re-read it every time).
         // Everything else changes the file set on disk and needs a full
         // re-scan, which supersedes any pending artwork refresh.
-        if (next.type === 'artwork' && result?.artRefresh !== false) {
+        if (result?.artRefresh === false) {
+          this.pendingArtRefresh.clear();
+          this.pendingFullRefresh = true;
+        } else if (next.type === 'artwork') {
           this.pendingArtRefresh.add(next.gameId);
         } else {
           this.pendingArtRefresh.clear();
           this._library.refreshGamesFiles();
         }
       } else {
+        if (result?.artRefresh === false) {
+          this.pendingArtRefresh.clear();
+          this.pendingFullRefresh = true;
+        }
         this.patchJob(next.id, {
           status: 'error',
           stage: 'Failed',

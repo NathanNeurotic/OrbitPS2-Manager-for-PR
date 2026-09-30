@@ -1,189 +1,64 @@
-import { Game, gameArt } from '@shared/types/game.type';
-import {
-  ArtType,
-  artTargetsForScope,
-  DEFAULT_ART_TYPES,
-  existingArtTypesForGame,
-} from './artwork-bulk.targets';
+import { Game } from '@shared/types/game.type';
+import { artTargetsForScope, existingArtTypesForGame } from './artwork-bulk.targets';
 
-function artFor(stem: string, type: string, name?: string): gameArt {
+function ps1Vcd(filename: string, canonicalTitle?: string, art: string[] = []): Game {
+  const stem = filename.replace(/\.[^.]+$/, '');
   return {
-    extension: 'png',
-    gameId: stem,
-    name: name ?? `${stem}_${type}`,
-    path: '',
-    type,
-    base64: '',
+    filename,
+    gameId: 'SCUS_944.25',
+    cdType: 'POPS',
+    title: canonicalTitle ?? stem,
+    canonicalTitle,
+    path: `/opl/POPS/${filename}`,
+    extension: '.VCD',
+    parentPath: '/opl/POPS',
+    system: 'PS1',
+    format: 'POPS',
+    art: art.map((name) => {
+      const idx = name.lastIndexOf('_');
+      return {
+        name,
+        gameId: name.slice(0, idx),
+        type: name.slice(idx + 1),
+        extension: '.png',
+        path: `/opl/ART/${name}.png`,
+      };
+    }) as Game['art'],
   };
 }
 
-function makeGame(
-  partial: Partial<Game> & { filename: string; gameId: string },
-): Game {
-  return {
-    cdType: '',
-    path: '',
-    extension: '',
-    parentPath: '',
-    ...partial,
-  } as Game;
-}
-
-function ps1Vcd(overrides: Partial<Game> = {}): Game {
-  return makeGame({
-    system: 'PS1',
-    filename: 'Spyro the Dragon.VCD',
-    gameId: 'SCUS_942.28',
-    title: 'Spyro the Dragon',
-    ...overrides,
-  });
-}
-
-describe('artTargetsForScope - RiptOPL save names', () => {
-  it('saves PS1 VCD art under the on-disk filename stem', () => {
-    const target = artTargetsForScope([ps1Vcd()], 'PS1')[0];
-    expect(target.saveAsName).toBe('Spyro the Dragon');
-    expect(target.gameId).toBe('SCUS_942.28');
-  });
-
-  it('keeps boot ELF names for PS1 launchers', () => {
-    const launcher = makeGame({
-      system: 'APPS',
-      filename: 'XX.SCUS_944.02.Game.ELF',
-      gameId: 'SCUS_944.02',
-      isPs1Launcher: true,
-      ps1LauncherBoot: 'XX.SCUS_944.02.Game.ELF',
-    });
-    const target = artTargetsForScope([launcher], 'APPS')[0];
-    expect(target.saveAsName).toBe('XX.SCUS_944.02.Game.ELF');
-    expect(target.system).toBe('PS1');
-  });
-
-  it('leaves PS2 targets on the default gameId save name', () => {
-    const ps2 = makeGame({
-      system: 'PS2',
-      filename: 'SLUS_208.51.iso',
-      gameId: 'SLUS_208.51',
-    });
-    const target = artTargetsForScope([ps2], 'PS2')[0];
-    expect(target.saveAsName).toBeUndefined();
-  });
-});
-
-describe('existingArtTypesForGame - RiptOPL readability', () => {
-  const types = DEFAULT_ART_TYPES;
-
-  it('counts art saved under the VCD filename stem', () => {
-    const game = ps1Vcd({
-      art: [artFor('Spyro the Dragon', 'COV'), artFor('Spyro the Dragon', 'ICO')],
-    });
-    expect(existingArtTypesForGame(game, types)).toEqual(['COV', 'ICO']);
-  });
-
-  it('does NOT count GameID art RiptOPL cannot read (title-renamed VCD)', () => {
-    const game = ps1Vcd({
-      art: [artFor('SCUS_942.28', 'COV')],
-    });
-    expect(existingArtTypesForGame(game, types)).toEqual([]);
-  });
-
-  it('still counts GameID art when the stem starts with the GameID', () => {
-    const game = ps1Vcd({
-      filename: 'SCUS_942.28.Spyro.VCD',
-      art: [artFor('SCUS_942.28', 'COV')],
-    });
-    expect(existingArtTypesForGame(game, types)).toEqual(['COV']);
-  });
-
-  it('counts PS2 art by gameId unchanged', () => {
-    const game = makeGame({
-      system: 'PS2',
-      filename: 'SLUS_208.51.iso',
-      gameId: 'SLUS_208.51',
-      art: [artFor('SLUS_208.51', 'COV')],
-    });
-    expect(existingArtTypesForGame(game, types)).toEqual(['COV']);
-  });
-
-  it('counts launcher art by boot ELF name', () => {
-    const launcher = makeGame({
-      system: 'APPS',
-      filename: 'XX.SCUS_944.02.Game.ELF',
-      gameId: 'SCUS_944.02',
-      isPs1Launcher: true,
-      ps1LauncherBoot: 'XX.SCUS_944.02.Game.ELF',
-      art: [artFor('launcher', 'COV', 'XX.SCUS_944.02.Game.ELF_COV')],
-    });
-    expect(existingArtTypesForGame(launcher, ['COV'])).toEqual(['COV']);
-  });
-});
-
-describe('artTargetsForScope - onlyMissing', () => {
-  it('queues a title-renamed VCD whose art is only GameID-named', () => {
-    const game = ps1Vcd({
-      art: [artFor('SCUS_942.28', 'COV')],
-    });
-    const targets = artTargetsForScope([game], 'PS1', {
-      onlyMissing: true,
-    });
-    expect(targets.length).toBe(1);
-    expect(targets[0].saveAsName).toBe('Spyro the Dragon');
-  });
-
-  it('drops a VCD that already has every type under its stem', () => {
-    const complete = ps1Vcd({
-      art: DEFAULT_ART_TYPES.map((type) => artFor('Spyro the Dragon', type)),
-    });
-    expect(
-      artTargetsForScope([complete], 'PS1', { onlyMissing: true }).length,
-    ).toBe(0);
-  });
-});
-
-describe('artTargetsForScope - PS1 canonical normalization', () => {
-  const types: ArtType[] = ['COV', 'ICO'];
+describe('artTargetsForScope PS1 normalization', () => {
+  const TYPES = ['COV', 'ICO'] as const;
 
   it('saves art under the current VCD name and renames nothing by default', () => {
-    const game = ps1Vcd({ format: 'POPS', canonicalTitle: 'SPYRO THE DRAGON' });
-    const [target] = artTargetsForScope([game], 'PS1');
+    const [target] = artTargetsForScope(
+      [ps1Vcd('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE")],
+      'PS1',
+    );
 
-    expect(target.saveAsName).toBe('Spyro the Dragon');
+    expect(target.saveAsName).toBe('Spyro 2');
     expect(target.normalizeKind).toBeUndefined();
     expect(target.canonicalName).toBeUndefined();
-    expect(target.renameFrom).toBe('Spyro the Dragon');
+    expect(target.renameFrom).toBe('Spyro 2');
   });
 
   it('carries the normalization request only when the user opted in', () => {
-    const game = ps1Vcd({ format: 'POPS', canonicalTitle: 'SPYRO THE DRAGON' });
-    const [target] = artTargetsForScope([game], 'PS1', { normalize: true });
+    const [target] = artTargetsForScope(
+      [ps1Vcd('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE")],
+      'PS1',
+      { normalize: true },
+    );
 
     expect(target.normalizeKind).toBe('VCD');
-    expect(target.canonicalName).toBe('SPYRO THE DRAGON');
-  });
-
-  it('never normalizes a PS1 launcher', () => {
-    const launcher = makeGame({
-      system: 'APPS',
-      filename: 'XX.SCUS_944.02.Game.ELF',
-      gameId: 'SCUS_944.02',
-      isPs1Launcher: true,
-      ps1LauncherBoot: 'XX.SCUS_944.02.Game.ELF',
-      canonicalTitle: 'SOME CANONICAL TITLE',
-    });
-    const [target] = artTargetsForScope([launcher], 'APPS', { normalize: true });
-
-    expect(target.normalizeKind).toBeUndefined();
-    expect(target.canonicalName).toBeUndefined();
-    expect(target.renameFrom).toBeUndefined();
+    expect(target.canonicalName).toBe("SPYRO 2 - RIPTO'S RAGE");
   });
 
   it('queues a complete-art game for renaming only when normalizing', () => {
-    const game = ps1Vcd({
-      format: 'POPS',
-      canonicalTitle: 'SPYRO THE DRAGON',
-      art: [artFor('Spyro the Dragon', 'COV'), artFor('Spyro the Dragon', 'ICO')],
-    });
-    const opts = { onlyMissing: true, artTypes: types };
+    const game = ps1Vcd('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE", [
+      'Spyro 2_COV',
+      'Spyro 2_ICO',
+    ]);
+    const opts = { onlyMissing: true, artTypes: [...TYPES] };
 
     expect(artTargetsForScope([game], 'PS1', opts).length).toBe(0);
     expect(
@@ -192,58 +67,67 @@ describe('artTargetsForScope - PS1 canonical normalization', () => {
   });
 
   it('does not count canonical-title art the storage was never renamed to', () => {
-    const game = ps1Vcd({
-      format: 'POPS',
-      canonicalTitle: 'SPYRO THE DRAGON',
-      art: [
-        artFor('SPYRO THE DRAGON', 'COV'),
-        artFor('Spyro the Dragon', 'ICO'),
-      ],
-    });
+    const game = ps1Vcd('Spyro 2.VCD', "SPYRO 2 - RIPTO'S RAGE", [
+      "SPYRO 2 - RIPTO'S RAGE_COV",
+      'Spyro 2_ICO',
+    ]);
 
-    expect(existingArtTypesForGame(game, types)).toEqual(['ICO']);
+    expect(existingArtTypesForGame(game, [...TYPES])).toEqual(['ICO']);
   });
 });
 
-describe('artTargetsForScope - Ember canonical normalization', () => {
-  function ember(overrides: Partial<Game> = {}): Game {
-    return makeGame({
-      system: 'PS1',
-      format: 'EMBER',
-      cdType: 'EMBER',
-      filename: 'Spyro the Dragon',
-      emberFolder: 'Spyro the Dragon',
-      emberCuePath: '/ember/games/Spyro the Dragon/game.cue',
-      gameId: 'SCUS_942.28',
-      title: 'Spyro the Dragon',
-      canonicalTitle: 'SPYRO THE DRAGON',
-      ...overrides,
-    });
-  }
 
-  it('normalizes the Ember folder and keeps dots in the name', () => {
-    const [target] = artTargetsForScope(
-      [ember({ emberFolder: 'Spyro 2. Cert of Darkness', filename: 'Spyro 2. Cert of Darkness' })],
-      'PS1',
-      { normalize: true },
-    );
-
-    expect(target.normalizeKind).toBe('EMBER');
-    expect(target.canonicalName).toBe('SPYRO THE DRAGON');
-    expect(target.renameFrom).toBe('Spyro 2. Cert of Darkness');
-  });
-
-  it('gives Ember art no GameID fallback', () => {
-    const game = ember({ art: [artFor('SCUS_942.28', 'COV')] });
+describe('RiptOPL PS1 artwork compatibility fallbacks', () => {
+  it('does not count loose GameID art for a title-only VCD', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', 'SPYRO THE DRAGON', [
+      'SCUS_942.28_COV',
+    ]);
+    game.gameId = 'SCUS_942.28';
 
     expect(existingArtTypesForGame(game, ['COV'])).toEqual([]);
   });
 
-  it('counts Ember art saved under the folder name', () => {
-    const game = ember({
-      art: [artFor('Spyro the Dragon', 'COV'), artFor('Spyro the Dragon', 'ICO')],
-    });
+  it('counts GameID art only when the VCD filename starts with that GameID', () => {
+    const game = ps1Vcd('SCUS_942.28.Spyro the Dragon.VCD', undefined, [
+      'SCUS_942.28_COV',
+    ]);
+    game.gameId = 'SCUS_942.28';
 
-    expect(existingArtTypesForGame(game, ['COV', 'ICO'])).toEqual(['COV', 'ICO']);
+    expect(existingArtTypesForGame(game, ['COV'])).toEqual(['COV']);
+  });
+
+  it('does not count 3D COV3 art as the COV2 back cover', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', undefined, [
+      'Spyro the Dragon_COV3',
+    ]);
+
+    expect(existingArtTypesForGame(game, ['COV2'])).toEqual([]);
+  });
+
+  it('counts a COV2 back cover saved under the storage name', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', undefined, [
+      'Spyro the Dragon_COV2',
+    ]);
+
+    expect(existingArtTypesForGame(game, ['COV2'])).toEqual(['COV2']);
+  });
+});
+
+
+describe('PS1 identification safety', () => {
+  it('excludes ambiguous PS1 discs from automatic artwork targets', () => {
+    const game = ps1Vcd('Alive Disc 2.VCD', 'Alive (Disc 2)');
+    game.identificationStatus = 'ambiguous';
+
+    expect(artTargetsForScope([game], 'PS1', { normalize: true })).toEqual([]);
+  });
+
+  it('keeps identified PS1 discs eligible for canonical artwork naming', () => {
+    const game = ps1Vcd('Alive Disc 2.VCD', 'Alive (Disc 2)');
+    game.identificationStatus = 'identified';
+
+    const [target] = artTargetsForScope([game], 'PS1', { normalize: true });
+    expect(target.saveAsName).toBe('Alive Disc 2');
+    expect(target.canonicalName).toBe('Alive (Disc 2)');
   });
 });

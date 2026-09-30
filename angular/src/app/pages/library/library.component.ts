@@ -123,7 +123,12 @@ export class LibraryComponent {
   /** Queues a POPStarter-conversion job for every POPSLoader/RiptOPL-style PS1 game. */
   convertAllPs1ToPopstarter() {
     const candidates = this._libraryService.currentLibraryValue.filter(
-      (g) => g.system === 'PS1' && !g.isPs1Launcher && g.format !== 'EMBER' && g.path && g.gameId
+      (g) =>
+        g.system === 'PS1' &&
+        !g.isPs1Launcher &&
+        g.format !== 'EMBER' &&
+        g.path &&
+        g.gameId
     );
     if (candidates.length === 0) {
       window.alert('No POPSLoader-style PS1 games to convert.');

@@ -11,9 +11,6 @@ export interface Ps1CanonicalRename {
 /**
  * Name RiptOPL keys a PS1 game's artwork by: the Ember game-folder name, or
  * the VCD filename without its extension. Undefined for non-PS1 entries.
- *
- * Ember folder names frequently contain dots, so they must never be run
- * through the VCD extension strip.
  */
 export function ps1StorageIdentity(game: Game): string | undefined {
   if (game.format === 'EMBER') return game.emberFolder;
@@ -21,26 +18,6 @@ export function ps1StorageIdentity(game: Game): string | undefined {
     return game.filename.replace(/\.[^./\\]+$/, '');
   }
   return undefined;
-}
-
-/**
- * The RiptOPL storage identity for a PS1 VCD: its on-disk filename without the
- * extension. RiptOPL reads artwork from `ART/<VCD-FILENAME>_<TYPE>.png`, so the
- * saved file must use the filename stem — never the disc GameID.
- *
- * The GameID is only a *readability* fallback: RiptOPL accepts GameID-named art
- * when the VCD file itself is (or was) named after the disc ID. When the user
- * or RiptOPL renamed the file to a title, GameID-named art is invisible and
- * must not count as "present", or "only download missing" would never fetch the
- * art RiptOPL can actually load.
- */
-/** The VCD filename stem that RiptOPL reads artwork under, or undefined. */
-export function ps1VcdStorageIdentity(
-  game: Game,
-): string | undefined {
-  if (game.format === 'EMBER') return game.emberFolder;
-  if (game.system !== 'PS1' || !game.filename) return undefined;
-  return game.filename.replace(/\.[^./\\]+$/, '');
 }
 
 /**
@@ -68,7 +45,14 @@ export function ps1ArtworkIdentities(game: Game): string[] {
 }
 
 export function ps1CanonicalStorageName(game: Game): string | undefined {
-  if (game.isPs1Launcher || !game.canonicalTitle) return undefined;
+  if (
+    game.isPs1Launcher ||
+    !game.canonicalTitle ||
+    (game.identificationStatus !== undefined &&
+      game.identificationStatus !== 'identified')
+  ) {
+    return undefined;
+  }
   const kind = game.format === 'EMBER' ? 'EMBER' : 'VCD';
   return sanitizeRiptOplPs1StorageName(game.canonicalTitle, kind);
 }

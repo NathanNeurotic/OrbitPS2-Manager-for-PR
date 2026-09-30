@@ -32,6 +32,7 @@ export function sanitizeGameFilename(name: string): string {
   return cleaned;
 }
 
+
 export type RiptOplPs1StorageKind = "VCD" | "EMBER";
 
 const RIPTOPL_PS1_STORAGE_MAX_BYTES: Record<RiptOplPs1StorageKind, number> = {

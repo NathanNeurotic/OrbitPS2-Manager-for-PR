@@ -14,15 +14,19 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LucideAngularModule } from 'lucide-angular';
 import { LibraryService } from '@shared/services/library.service';
-import { KNOWN_ART_TYPES, artTypeLabel } from '@shared/constants/artwork-presets';
+import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
+import {
+  KNOWN_ART_TYPES,
+  artSaveNamesForSelection,
+  artTypeLabel,
+} from '@shared/constants/artwork-presets';
 import {
   ImportJob,
   JobLogEntry,
   JobsService,
 } from '@shared/services/jobs.service';
 import { Game } from '@shared/types/game.type';
-import { ps1CanonicalRenameConfirm } from '@shared/utils/ps1-artwork-identities';
-import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
+import { ps1CanonicalRenameConfirm } from '@shared/utils/ps1-canonical-rename';
 import {
   ArtScope,
   ArtTarget,
@@ -240,13 +244,13 @@ export class ArtworkBulkDialogComponent implements OnInit {
 
   private readonly _cdr = inject(ChangeDetectorRef);
   private readonly _destroyRef = inject(DestroyRef);
+  private readonly _confirm = inject(ConfirmDialogService);
   private readonly logAreaRef = viewChild<ElementRef<HTMLElement>>('logArea');
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly _library: LibraryService,
     private readonly _jobs: JobsService,
-    private readonly _confirm: ConfirmDialogService,
   ) {
     // Never leave the interval running past the dialog's own lifetime.
     this._destroyRef.onDestroy(() => this.stopElapsedTimer());
@@ -365,6 +369,9 @@ export class ArtworkBulkDialogComponent implements OnInit {
   }
 
   private enqueueTargets(targets: ArtTarget[]) {
+    const artSaveAsOverrides = Object.fromEntries(
+      artSaveNamesForSelection(this.artTypes()),
+    );
     const created = this._jobs.enqueue(
       targets.map((t) => ({
         type: 'artwork' as const,
@@ -379,6 +386,7 @@ export class ArtworkBulkDialogComponent implements OnInit {
         canonicalName: t.canonicalName,
         overwrite: this.overwrite(),
         artTypes: [...this.artTypes()],
+        artSaveAsOverrides,
         wideSlotFallback: true,
       })),
     );

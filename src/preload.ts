@@ -76,6 +76,13 @@ function buildLibraryAPI() {
       newTitle: string
     ) =>
       ipcRenderer.invoke("rename-ps1-launcher-step1", vcdPath, gameId, newTitle),
+    normalizeRiptOplPs1Storage: (params: {
+      kind: "VCD" | "EMBER";
+      sourcePath: string;
+      gameId: string;
+      canonicalTitle: string;
+      artDir: string;
+    }) => ipcRenderer.invoke("normalize-riptopl-ps1-storage", params),
     renamePs1LauncherStep2: (params: {
       newAppsFolder: string;
       oldElfFile?: string;
@@ -128,13 +135,6 @@ function buildLibraryAPI() {
     removeAllConvertPs1PopstarterProgressListeners: () => {
       ipcRenderer.removeAllListeners("convert-ps1-popstarter-progress");
     },
-    normalizeRiptOplPs1Storage: (params: {
-      kind: "VCD" | "EMBER";
-      sourcePath: string;
-      gameId: string;
-      canonicalTitle: string;
-      artDir: string;
-    }) => ipcRenderer.invoke("normalize-riptopl-ps1-storage", params),
 
     // ── Delete ─────────────────────────────────────
     deleteApp: (oplRoot: string, folder: string) =>
@@ -179,6 +179,17 @@ function buildLibraryAPI() {
         gameId,
         launcherFolder,
         bootName
+      ),
+    deleteEmberGameAndRelatedFiles: (
+      gamePath: string,
+      artDir: string,
+      identity: string,
+    ) =>
+      ipcRenderer.invoke(
+        "delete-ember-game-and-related-files",
+        gamePath,
+        artDir,
+        identity,
       ),
     onDeletePs1Progress: (
       callback: (entry: {

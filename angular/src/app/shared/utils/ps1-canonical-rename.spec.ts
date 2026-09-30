@@ -4,8 +4,7 @@ import {
   ps1CanonicalRename,
   ps1CanonicalStorageName,
   ps1StorageIdentity,
-  ps1VcdStorageIdentity,
-} from './ps1-artwork-identities';
+} from './ps1-canonical-rename';
 
 function makeGame(partial: Partial<Game> & { filename: string }): Game {
   return {
@@ -32,7 +31,7 @@ function makeEmber(partial: Partial<Game> = {}): Game {
 describe('ps1ArtworkIdentities', () => {
   it('returns the VCD filename stem for a PS1 VCD', () => {
     expect(
-      ps1VcdStorageIdentity(
+      ps1StorageIdentity(
         makeGame({ system: 'PS1', filename: 'Spyro the Dragon.VCD' }),
       ),
     ).toBe('Spyro the Dragon');
@@ -95,7 +94,6 @@ describe('ps1StorageIdentity', () => {
   it('uses the Ember folder verbatim, dots included', () => {
     const game = makeEmber({ emberFolder: 'Wipeout 3. Special Edition' });
     expect(ps1StorageIdentity(game)).toBe('Wipeout 3. Special Edition');
-    expect(ps1VcdStorageIdentity(game)).toBe('Wipeout 3. Special Edition');
   });
 
   it('keeps the Ember folder as the only artwork identity', () => {
