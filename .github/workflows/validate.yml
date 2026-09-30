@@ -41,3 +41,8 @@ jobs:
       - name: Build Angular
         working-directory: angular
         run: npm run build
+
+      # ubuntu-latest ships Google Chrome; Karma drives it headless.
+      - name: Run Angular tests
+        working-directory: angular
+        run: npm test -- --watch=false --browsers=ChromeHeadless
