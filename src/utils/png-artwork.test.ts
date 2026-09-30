@@ -103,8 +103,8 @@ test("non-indexed source is rejected instead of writing incompatible art", () =>
 });
 
 
-test("RiptOPL COV3 keeps the database secondary-cover dimensions", () => {
+test("COV2 back cover keeps the database back-cover dimensions", () => {
   const input = indexedPng(222, 200);
-  const output = normalizeArtworkPng(input, "PS1", "COV3");
+  const output = normalizeArtworkPng(input, "PS1", "COV2");
   assert.equal(output, input);
 });

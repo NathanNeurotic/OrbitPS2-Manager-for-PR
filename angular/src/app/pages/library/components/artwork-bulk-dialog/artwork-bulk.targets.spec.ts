@@ -96,9 +96,17 @@ describe('RiptOPL PS1 artwork compatibility fallbacks', () => {
     expect(existingArtTypesForGame(game, ['COV'])).toEqual(['COV']);
   });
 
-  it('treats local COV3 as satisfying the database COV2 slot', () => {
+  it('does not count 3D COV3 art as the COV2 back cover', () => {
     const game = ps1Vcd('Spyro the Dragon.VCD', undefined, [
       'Spyro the Dragon_COV3',
+    ]);
+
+    expect(existingArtTypesForGame(game, ['COV2'])).toEqual([]);
+  });
+
+  it('counts a COV2 back cover saved under the storage name', () => {
+    const game = ps1Vcd('Spyro the Dragon.VCD', undefined, [
+      'Spyro the Dragon_COV2',
     ]);
 
     expect(existingArtTypesForGame(game, ['COV2'])).toEqual(['COV2']);

@@ -220,7 +220,7 @@ test("VMC folder follows a successful canonical VCD rename", async () => {
 });
 
 
-test("legacy COV2 art migrates into the RiptOPL COV3 slot", async () => {
+test("COV2 back cover and COV3 3D art each keep their own slot on rename", async () => {
   await withTempDir(async (dir) => {
     const popsDir = path.join(dir, "POPS");
     const artDir = path.join(dir, "ART");
@@ -229,7 +229,8 @@ test("legacy COV2 art migrates into the RiptOPL COV3 slot", async () => {
 
     const vcd = path.join(popsDir, "Spyro.VCD");
     await fs.writeFile(vcd, "vcd");
-    await fs.writeFile(path.join(artDir, "Spyro_COV2.png"), "secondary");
+    await fs.writeFile(path.join(artDir, "Spyro_COV2.png"), "back");
+    await fs.writeFile(path.join(artDir, "Spyro_COV3.png"), "3d");
 
     const result = await normalizeRiptOplPs1Storage({
       kind: "VCD",
@@ -241,13 +242,15 @@ test("legacy COV2 art migrates into the RiptOPL COV3 slot", async () => {
 
     assert.equal(result.success, true);
     assert.equal(
-      await fs.readFile(
-        path.join(artDir, "SPYRO THE DRAGON_COV3.png"),
-        "utf8",
-      ),
-      "secondary",
+      await fs.readFile(path.join(artDir, "SPYRO THE DRAGON_COV2.png"), "utf8"),
+      "back",
+    );
+    assert.equal(
+      await fs.readFile(path.join(artDir, "SPYRO THE DRAGON_COV3.png"), "utf8"),
+      "3d",
     );
     await assert.rejects(() => fs.access(path.join(artDir, "Spyro_COV2.png")));
+    await assert.rejects(() => fs.access(path.join(artDir, "Spyro_COV3.png")));
   });
 });
 

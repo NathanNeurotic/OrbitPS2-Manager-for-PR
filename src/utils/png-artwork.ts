@@ -31,7 +31,7 @@ const EXPECTED_DIMENSIONS: Record<
     BG: { width: 640, height: 480 },
     LGO: { width: 300, height: 125 },
     LAB: { width: 12, height: 200 },
-    COV3: { width: 222, height: 200 },
+    COV2: { width: 222, height: 200 },
   },
   PS2: {
     COV: { width: 280, height: 400 },
@@ -41,7 +41,7 @@ const EXPECTED_DIMENSIONS: Record<
     BG: { width: 640, height: 480 },
     LGO: { width: 300, height: 125 },
     LAB: { width: 18, height: 240 },
-    COV3: { width: 242, height: 344 },
+    COV2: { width: 242, height: 344 },
   },
 };
 

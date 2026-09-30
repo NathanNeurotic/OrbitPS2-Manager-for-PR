@@ -83,8 +83,7 @@ async function renameMatchingCoverArt(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed || !matches(parsed.identity)) continue;
 
-    const targetType =
-      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const targetType = parsed.type;
     const newName = `${newBaseName}_${targetType}${ext}`;
     if (newName === name) continue;
 
@@ -143,8 +142,7 @@ async function copyMatchingCoverArt(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed || !matches(parsed.identity)) continue;
 
-    const targetType =
-      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const targetType = parsed.type;
     const targetName = `${newBaseName}_${targetType}${ext}`;
     if (targetName.toLocaleLowerCase() === name.toLocaleLowerCase()) continue;
 
@@ -240,8 +238,7 @@ async function planMatchingCoverArtRenames(
     const parsed = parseArtworkBaseName(baseName);
     if (!parsed) continue;
 
-    const targetType =
-      parsed.type.toUpperCase() === "COV2" ? "COV3" : parsed.type;
+    const targetType = parsed.type;
     const targetName = newBaseName + "_" + targetType + ext;
     if (targetName === name) continue;
 
